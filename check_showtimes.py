@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - Stealth mode with Fandango fallback
+AMC Dolby Showtime Monitor - Improved Fandango parsing
 """
 
 import json
 import os
 import re
-import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -17,13 +16,10 @@ IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
-
-# Fandango theater ID for this location
 FANDANGO_THEATER_ID = "aavib"
 
 
-def try_fandango():
-    """Try Fandango as primary source - more reliable than AMC direct"""
+def get_dolby_showtimes():
     from playwright.sync_api import sync_playwright
     
     dolby_showtimes = []
@@ -36,123 +32,120 @@ def try_fandango():
         )
         page = context.new_page()
         
-        # Check multiple days
         for day_offset in range(7):
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
-            # Fandango theater page
             url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
             
-            print(f"  Checking Fandango {date_str}...")
+            print(f"  Checking {date_str}...")
             
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2000)
                 
+                # Scroll down to load movie listings
+                for _ in range(3):
+                    page.evaluate("window.scrollBy(0, 1000)")
+                    page.wait_for_timeout(500)
+                
+                # Get FULL page text
                 full_text = page.inner_text('body')
                 
-                # Debug: Show what we got on first day
+                # Debug: Show relevant portion on first day
                 if day_offset == 0:
-                    print(f"\n--- FANDANGO PAGE (first 2000 chars) ---")
-                    print(full_text[:2000])
-                    print(f"--- END ---\n")
-                
-                if 'dolby' in full_text.lower():
-                    print(f"    ✅ Found Dolby content!")
+                    # Find where movie listings start (after offers)
+                    lower_text = full_text.lower()
                     
-                    # Parse the page for Dolby showtimes
+                    # Look for Dolby section
+                    dolby_pos = lower_text.find('dolby')
+                    if dolby_pos > 0:
+                        # Show context around Dolby mention
+                        start = max(0, dolby_pos - 200)
+                        end = min(len(full_text), dolby_pos + 800)
+                        print(f"\n--- DOLBY CONTEXT ---")
+                        print(full_text[start:end])
+                        print(f"--- END CONTEXT ---\n")
+                    
+                    print(f"Total page length: {len(full_text)} chars")
+                    print(f"'dolby' appears {lower_text.count('dolby')} times")
+                
+                # Parse for Dolby showtimes
+                if 'dolby' in full_text.lower():
+                    # Split into sections - movies typically separated by blank lines or specific patterns
                     lines = full_text.split('\n')
+                    
                     current_movie = None
+                    in_dolby_section = False
                     
                     for i, line in enumerate(lines):
-                        line_lower = line.lower().strip()
+                        line_stripped = line.strip()
+                        line_lower = line_stripped.lower()
                         
-                        # Check if this looks like a movie title (before format info)
-                        if line.strip() and len(line.strip()) > 3:
-                            # Movie titles are usually standalone lines before format/time info
-                            if not any(x in line_lower for x in ['dolby', 'imax', 'standard', 'premium', 'reserve', 'dine-in', 'am', 'pm', '$', 'buy', 'sold']):
-                                if ':' not in line or len(line) > 30:  # Not a time
-                                    current_movie = line.strip()
+                        if not line_stripped:
+                            continue
                         
-                        # Look for Dolby Cinema format
-                        if 'dolby' in line_lower:
-                            # Get times from nearby lines
-                            context_start = max(0, i)
-                            context_end = min(len(lines), i + 8)
-                            context = '\n'.join(lines[context_start:context_end])
+                        # Detect if we're entering a Dolby section
+                        if 'dolby cinema' in line_lower or 'dolby atmos' in line_lower:
+                            in_dolby_section = True
                             
-                            # Find times
+                            # Look backwards for movie name
+                            for j in range(i-1, max(0, i-15), -1):
+                                candidate = lines[j].strip()
+                                if candidate and len(candidate) > 5:
+                                    # Movie names are typically title case, not all caps
+                                    # Skip common non-movie strings
+                                    skip_words = ['dolby', 'imax', 'standard', 'premium', 'reserve', 
+                                                  'dine-in', 'buy', 'sold', 'tickets', 'fandango',
+                                                  'offers', 'screen', 'theater', 'cinema', 'movie',
+                                                  'showtimes', 'today', 'tomorrow', 'select']
+                                    
+                                    if not any(w in candidate.lower() for w in skip_words):
+                                        # Check if it looks like a time
+                                        if not re.match(r'^\d{1,2}:\d{2}', candidate):
+                                            current_movie = candidate
+                                            break
+                            
+                            continue
+                        
+                        # If we're in a Dolby section, look for times
+                        if in_dolby_section or 'dolby' in line_lower:
+                            # Find times in current line and next few lines
+                            context = '\n'.join(lines[i:min(len(lines), i+5)])
                             times = re.findall(r'(\d{1,2}:\d{2}\s*[apAP]\.?[mM]\.?)', context)
                             
-                            if current_movie and times:
-                                for time in times[:3]:  # Limit to 3 times per section
-                                    dolby_showtimes.append({
+                            if times and current_movie:
+                                for time in times:
+                                    showtime = {
                                         'movie': current_movie,
                                         'date': date_str,
                                         'time': time.strip(),
-                                    })
+                                    }
+                                    dolby_showtimes.append(showtime)
                                     print(f"    Found: {current_movie} at {time}")
-                    
+                                
+                                in_dolby_section = False  # Reset after finding times
+                        
+                        # Reset Dolby section if we hit another format type
+                        if any(f in line_lower for f in ['standard', 'imax', 'prime', 'reald']):
+                            if 'dolby' not in line_lower:
+                                in_dolby_section = False
+                
             except Exception as e:
                 print(f"    Error: {e}")
         
         browser.close()
     
-    return dolby_showtimes
-
-
-def try_google_showtimes():
-    """Fallback: Search Google for showtimes"""
-    from playwright.sync_api import sync_playwright
+    # Deduplicate
+    seen = set()
+    unique = []
+    for st in dolby_showtimes:
+        key = f"{st['movie']}|{st['date']}|{st['time']}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(st)
     
-    dolby_showtimes = []
-    
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        
-        search_url = "https://www.google.com/search?q=AMC+DINE-IN+Thousand+Oaks+14+dolby+cinema+showtimes"
-        
-        print(f"  Trying Google search...")
-        
-        try:
-            page.goto(search_url, timeout=30000)
-            page.wait_for_timeout(3000)
-            
-            full_text = page.inner_text('body')
-            
-            print(f"\n--- GOOGLE RESULTS (first 2000 chars) ---")
-            print(full_text[:2000])
-            print(f"--- END ---\n")
-            
-            if 'dolby' in full_text.lower():
-                print("  ✅ Found Dolby in Google results")
-                # Parse results...
-                
-        except Exception as e:
-            print(f"  Error: {e}")
-        
-        browser.close()
-    
-    return dolby_showtimes
-
-
-def get_dolby_showtimes():
-    """Try multiple sources to find Dolby showtimes"""
-    
-    # Try Fandango first (more reliable)
-    print("\n📍 Trying Fandango...")
-    showtimes = try_fandango()
-    
-    if showtimes:
-        return showtimes
-    
-    # Fallback to Google
-    print("\n📍 Trying Google search fallback...")
-    showtimes = try_google_showtimes()
-    
-    return showtimes
+    return unique
 
 
 def send_notification(movie, time, date):
@@ -202,21 +195,13 @@ def main():
     seen = load_seen()
     print(f"\n📋 {len(seen)} previously seen showtimes")
     
+    print(f"\n🔍 Checking Fandango for Dolby showtimes...")
     showtimes = get_dolby_showtimes()
     
-    # Deduplicate
-    unique = []
-    seen_keys = set()
-    for st in showtimes:
-        key = f"{st['movie']}|{st['date']}|{st['time']}"
-        if key not in seen_keys:
-            seen_keys.add(key)
-            unique.append(st)
-    
-    print(f"\n📽️  Found {len(unique)} unique Dolby showtimes\n")
+    print(f"\n📽️  Found {len(showtimes)} unique Dolby showtimes\n")
     
     new_count = 0
-    for st in unique:
+    for st in showtimes:
         key = f"{st['movie']}|{st['date']}|{st['time']}"
         if key not in seen:
             new_count += 1
@@ -225,7 +210,7 @@ def main():
             seen[key] = {"date": st['date'], "added": datetime.now().isoformat()}
     
     if new_count == 0:
-        if len(unique) == 0:
+        if len(showtimes) == 0:
             print("✓ No Dolby showtimes currently listed")
         else:
             print("✓ No NEW Dolby showtimes (all already seen)")
