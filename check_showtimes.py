@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - GitHub Actions Version
-Uses Playwright to render JavaScript-heavy pages
+AMC Dolby Showtime Monitor - Debug Version
 """
 
 import json
@@ -12,14 +11,11 @@ from pathlib import Path
 
 import requests
 
-# Configuration
 IFTTT_WEBHOOK_KEY = os.environ.get("IFTTT_WEBHOOK_KEY", "")
 IFTTT_EVENT_NAME = "new_dolby_showtime"
-DAYS_AHEAD = 7
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
-THEATER_URL = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-dine-in-thousand-oaks-14/showtimes"
 
 
 def get_dolby_showtimes():
@@ -31,43 +27,76 @@ def get_dolby_showtimes():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        for day_offset in range(DAYS_AHEAD):
-            date = datetime.now() + timedelta(days=day_offset)
-            date_str = date.strftime("%Y-%m-%d")
-            url = f"{THEATER_URL}/all/{date_str}/dolby-cinema-at-amc/all"
+        # Just check today's date on the main showtimes page (no filter)
+        date = datetime.now()
+        date_str = date.strftime("%Y-%m-%d")
+        
+        # Try the unfiltered showtimes page first
+        url = f"https://www.amctheatres.com/movie-theatres/los-angeles/amc-dine-in-thousand-oaks-14/showtimes/all/{date_str}/all/all"
+        
+        print(f"Loading: {url}")
+        
+        try:
+            page.goto(url, timeout=60000, wait_until="networkidle")
+            page.wait_for_timeout(5000)  # Extra 5 seconds
             
-            print(f"  Checking {date_str}...")
+            # Get all text on page
+            full_text = page.inner_text('body')
             
-            try:
-                page.goto(url, timeout=30000)
-                page.wait_for_timeout(3000)
-                content = page.content()
+            print(f"\n--- PAGE TEXT (first 2000 chars) ---")
+            print(full_text[:2000])
+            print(f"--- END PAGE TEXT ---\n")
+            
+            # Check for Dolby anywhere
+            if 'dolby' in full_text.lower():
+                print("✅ Found 'Dolby' mentioned on page!")
                 
-                if 'dolby' not in content.lower():
-                    continue
+                # Find all lines containing Dolby
+                lines = full_text.split('\n')
+                dolby_lines = [l.strip() for l in lines if 'dolby' in l.lower()]
+                print(f"Lines with 'Dolby': {dolby_lines[:10]}")
                 
-                full_text = page.inner_text('body')
-                sections = re.split(r'\n(?=[A-Z][A-Za-z\s:\'0-9]+\n)', full_text)
-                
-                for section in sections:
-                    if 'dolby' in section.lower():
-                        lines = section.strip().split('\n')
-                        movie_name = lines[0] if lines else "Unknown"
-                        times = re.findall(r'\b(\d{1,2}:\d{2}\s*[apAP][mM]?)\b', section)
+                # Try to extract showtimes near Dolby mentions
+                for i, line in enumerate(lines):
+                    if 'dolby' in line.lower():
+                        # Get surrounding context
+                        start = max(0, i-5)
+                        end = min(len(lines), i+10)
+                        context = '\n'.join(lines[start:end])
+                        
+                        # Look for movie name (usually a line with title case before Dolby)
+                        movie_name = "Unknown"
+                        for j in range(i-1, max(0, i-6), -1):
+                            candidate = lines[j].strip()
+                            if candidate and len(candidate) > 3 and not candidate.startswith(('$', '•')):
+                                if not any(x in candidate.lower() for x in ['dolby', 'imax', 'digital', 'select']):
+                                    movie_name = candidate
+                                    break
+                        
+                        # Find times in context
+                        times = re.findall(r'(\d{1,2}:\d{2}\s*[apAP]\.?[mM]\.?)', context)
                         
                         for time in times:
                             dolby_showtimes.append({
-                                'movie': movie_name.strip(),
+                                'movie': movie_name,
                                 'date': date_str,
                                 'time': time,
                             })
-                            print(f"    Found: {movie_name.strip()} at {time}")
+                            print(f"  Found: {movie_name} at {time}")
+            else:
+                print("❌ No 'Dolby' found on page")
                 
-            except Exception as e:
-                print(f"    Error: {e}")
+                # Check if page loaded at all
+                if len(full_text) < 500:
+                    print("⚠️ Page might not have loaded properly")
+                    print(f"Page length: {len(full_text)} chars")
+                
+        except Exception as e:
+            print(f"Error: {e}")
         
         browser.close()
     
+    # Deduplicate
     seen = set()
     unique = []
     for st in dolby_showtimes:
@@ -95,8 +124,6 @@ def send_notification(movie, time, date):
         
         if resp.status_code == 200:
             print(f"  ✅ Notified: {movie} - {time}")
-        else:
-            print(f"  ❌ Failed: {resp.status_code}")
     except Exception as e:
         print(f"  ❌ Error: {e}")
 
@@ -120,15 +147,13 @@ def save_seen(seen):
 
 def main():
     print(f"\n{'='*50}")
-    print(f"AMC Dolby Monitor")
+    print(f"AMC Dolby Monitor - DEBUG")
     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"Theater: {THEATER_NAME}")
     print(f"{'='*50}\n")
     
     seen = load_seen()
-    print(f"📋 {len(seen)} previously seen\n")
     
-    print(f"🔍 Checking {DAYS_AHEAD} days for Dolby showtimes...\n")
     showtimes = get_dolby_showtimes()
     
     print(f"\n📽️  Found {len(showtimes)} Dolby showtimes\n")
@@ -142,13 +167,14 @@ def main():
             send_notification(st['movie'], st['time'], st['date'])
             seen[key] = {"date": st['date'], "added": datetime.now().isoformat()}
     
-    if new_count == 0:
-        print("✓ No new Dolby showtimes")
+    if new_count == 0 and len(showtimes) == 0:
+        print("✓ No Dolby showtimes found")
+    elif new_count == 0:
+        print("✓ No NEW Dolby showtimes")
     else:
         print(f"\n🎉 {new_count} new!")
     
     save_seen(seen)
-    print(f"\n💾 Saved ({len(seen)} total)")
 
 
 if __name__ == "__main__":
