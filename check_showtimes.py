@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - Debug Version
+AMC Dolby Showtime Monitor - Navigate through site properly
 """
 
 import json
@@ -16,6 +16,7 @@ IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
+THEATER_PAGE = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-dine-in-thousand-oaks-14"
 
 
 def get_dolby_showtimes():
@@ -25,74 +26,94 @@ def get_dolby_showtimes():
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        
-        # Just check today's date on the main showtimes page (no filter)
-        date = datetime.now()
-        date_str = date.strftime("%Y-%m-%d")
-        
-        # Try the unfiltered showtimes page first
-        url = f"https://www.amctheatres.com/movie-theatres/los-angeles/amc-dine-in-thousand-oaks-14/showtimes/all/{date_str}/all/all"
-        
-        print(f"Loading: {url}")
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        page = context.new_page()
         
         try:
-            page.goto(url, timeout=60000, wait_until="networkidle")
-            page.wait_for_timeout(5000)  # Extra 5 seconds
+            # Step 1: Go to the theater's main page first
+            print(f"Step 1: Loading theater page...")
+            page.goto(THEATER_PAGE, timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
             
-            # Get all text on page
+            # Step 2: Click on "Showtimes" or find showtimes section
+            print(f"Step 2: Looking for showtimes...")
+            
+            # Try clicking the showtimes tab/link if it exists
+            try:
+                showtimes_link = page.locator('a:has-text("Showtimes")').first
+                if showtimes_link.is_visible():
+                    showtimes_link.click()
+                    page.wait_for_timeout(3000)
+            except:
+                pass
+            
+            # Get the page content
+            page.wait_for_timeout(2000)
             full_text = page.inner_text('body')
             
-            print(f"\n--- PAGE TEXT (first 2000 chars) ---")
-            print(full_text[:2000])
+            print(f"\n--- PAGE TEXT (first 3000 chars) ---")
+            print(full_text[:3000])
             print(f"--- END PAGE TEXT ---\n")
+            print(f"Total page length: {len(full_text)} chars\n")
             
-            # Check for Dolby anywhere
+            # Check for Dolby content
             if 'dolby' in full_text.lower():
                 print("✅ Found 'Dolby' mentioned on page!")
                 
-                # Find all lines containing Dolby
+                # Try to find movie sections with Dolby
                 lines = full_text.split('\n')
-                dolby_lines = [l.strip() for l in lines if 'dolby' in l.lower()]
-                print(f"Lines with 'Dolby': {dolby_lines[:10]}")
                 
-                # Try to extract showtimes near Dolby mentions
+                current_movie = None
                 for i, line in enumerate(lines):
-                    if 'dolby' in line.lower():
-                        # Get surrounding context
-                        start = max(0, i-5)
-                        end = min(len(lines), i+10)
-                        context = '\n'.join(lines[start:end])
-                        
-                        # Look for movie name (usually a line with title case before Dolby)
-                        movie_name = "Unknown"
-                        for j in range(i-1, max(0, i-6), -1):
+                    line = line.strip()
+                    
+                    # Skip empty lines
+                    if not line:
+                        continue
+                    
+                    # Look for Dolby Cinema mentions
+                    if 'dolby cinema' in line.lower() or 'dolby' in line.lower():
+                        # Look backwards for movie name
+                        for j in range(i-1, max(0, i-10), -1):
                             candidate = lines[j].strip()
-                            if candidate and len(candidate) > 3 and not candidate.startswith(('$', '•')):
-                                if not any(x in candidate.lower() for x in ['dolby', 'imax', 'digital', 'select']):
-                                    movie_name = candidate
-                                    break
+                            if candidate and len(candidate) > 3:
+                                # Skip format/time indicators
+                                if not any(x in candidate.lower() for x in ['dolby', 'imax', 'digital', 'prime', 'reserve', 'standard', 'am', 'pm', ':']):
+                                    if not candidate.startswith(('$', '•', '-')):
+                                        current_movie = candidate
+                                        break
                         
-                        # Find times in context
+                        # Look for times nearby
+                        context_start = max(0, i-2)
+                        context_end = min(len(lines), i+5)
+                        context = '\n'.join(lines[context_start:context_end])
+                        
                         times = re.findall(r'(\d{1,2}:\d{2}\s*[apAP]\.?[mM]\.?)', context)
                         
-                        for time in times:
-                            dolby_showtimes.append({
-                                'movie': movie_name,
-                                'date': date_str,
-                                'time': time,
-                            })
-                            print(f"  Found: {movie_name} at {time}")
+                        if current_movie and times:
+                            for time in times:
+                                print(f"  Found: {current_movie} at {time}")
+                                dolby_showtimes.append({
+                                    'movie': current_movie,
+                                    'date': datetime.now().strftime("%Y-%m-%d"),
+                                    'time': time,
+                                })
             else:
                 print("❌ No 'Dolby' found on page")
                 
-                # Check if page loaded at all
-                if len(full_text) < 500:
-                    print("⚠️ Page might not have loaded properly")
-                    print(f"Page length: {len(full_text)} chars")
-                
+                # Check what we did find
+                if 'showtimes' in full_text.lower():
+                    print("  (But 'showtimes' IS on the page)")
+                if len(full_text) < 1000:
+                    print(f"  ⚠️ Page seems short ({len(full_text)} chars)")
+                    
         except Exception as e:
             print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         browser.close()
     
@@ -147,7 +168,7 @@ def save_seen(seen):
 
 def main():
     print(f"\n{'='*50}")
-    print(f"AMC Dolby Monitor - DEBUG")
+    print(f"AMC Dolby Monitor")
     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"Theater: {THEATER_NAME}")
     print(f"{'='*50}\n")
