@@ -19,7 +19,10 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
-        run: pip install requests beautifulsoup4
+        run: |
+          pip install requests playwright
+          playwright install chromium
+          playwright install-deps chromium
       
       - name: Restore seen showtimes cache
         uses: actions/cache@v4
@@ -32,5 +35,4 @@ jobs:
       - name: Check for new Dolby showtimes
         env:
           IFTTT_WEBHOOK_KEY: ${{ secrets.IFTTT_WEBHOOK_KEY }}
-          THEATER_SLUG: ${{ vars.THEATER_SLUG }}
         run: python check_showtimes.py
