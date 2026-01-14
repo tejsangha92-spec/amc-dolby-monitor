@@ -234,4 +234,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        print("🧪 Sending test notification...")
+        send_notification("TEST MOVIE", "7:00p", "2026-01-14")
+        print("✅ Test notification sent! Check your phone.")
+    else:
+        main()
