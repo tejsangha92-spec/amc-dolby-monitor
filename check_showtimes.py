@@ -32,7 +32,7 @@ def get_dolby_showtimes():
         )
         page = context.new_page()
         
-        for day_offset in range(14):  # Check 2 weeks
+        for day_offset in range(28):  # Check 4 weeks
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
