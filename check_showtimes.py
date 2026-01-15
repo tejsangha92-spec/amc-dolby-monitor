@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - Clicks Dolby filter for reliable parsing
+AMC Dolby Showtime Monitor - Scrapes AMC website directly
 """
 
 import json
@@ -16,7 +16,7 @@ IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
-FANDANGO_THEATER_ID = "aavib"
+AMC_THEATER_SLUG = "amc-dine-in-thousand-oaks-14"
 
 
 def get_dolby_showtimes():
@@ -36,112 +36,76 @@ def get_dolby_showtimes():
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
-            url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
+            # AMC URL format with Dolby Cinema filter
+            url = f"https://www.amctheatres.com/movie-theatres/los-angeles-area/{AMC_THEATER_SLUG}/showtimes/all/{date_str}/dolby-cinema/all"
             
             print(f"  Checking {date_str}...")
             
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(3000)  # Wait for dynamic content
                 
-                # Try to click the Dolby Cinema filter
-                dolby_filter_clicked = False
-                try:
-                    # Look for the Dolby Cinema filter button
-                    dolby_btn = page.locator('text="DOLBY CINEMA"').first
-                    if dolby_btn.is_visible():
-                        dolby_btn.click()
-                        page.wait_for_timeout(1500)
-                        dolby_filter_clicked = True
-                        print(f"    ✓ Clicked Dolby filter")
-                except:
-                    pass
-                
-                # Get page text after filtering
+                # Get page content
                 full_text = page.inner_text('body')
                 
-                # Debug on first day
+                # Debug output on first day
                 if day_offset == 0:
-                    print(f"\n--- PAGE AFTER FILTER (first 2500 chars) ---")
-                    print(full_text[:2500])
+                    print(f"\n--- AMC PAGE CONTENT (first 3000 chars) ---")
+                    print(full_text[:3000])
                     print(f"--- END ---\n")
                     print(f"Total length: {len(full_text)} chars")
                 
-                # Check for "no showtimes" message
-                if 'no showtimes' in full_text.lower() or 'no movies' in full_text.lower():
-                    print(f"    No Dolby showtimes for {date_str}")
+                # Check for no showtimes message
+                if 'no showtimes' in full_text.lower() or 'currently no movies' in full_text.lower():
                     continue
                 
-                # Parse movies - after clicking filter, all shown movies should be Dolby
-                if dolby_filter_clicked:
-                    lines = full_text.split('\n')
-                    current_movie = None
+                # Parse text for movie + times pattern
+                lines = full_text.split('\n')
+                current_movie = None
+                
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    if not line:
+                        continue
                     
-                    for i, line in enumerate(lines):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        
-                        # Movie titles typically have year in parens and are followed by rating info
-                        if re.search(r'\(\d{4}\)$', line):
-                            current_movie = line
-                            continue
-                        
-                        # Look for showtimes (format: 7:00p, 10:30p, etc)
-                        if current_movie:
-                            times = re.findall(r'(\d{1,2}:\d{2}[ap])', line.lower())
-                            for t in times:
-                                # Format time properly
-                                time_str = t[:-1] + ':00 ' + ('PM' if t[-1] == 'p' else 'AM')
-                                dolby_showtimes.append({
-                                    'movie': current_movie,
-                                    'date': date_str,
-                                    'time': t,
-                                })
-                                print(f"    🎬 {current_movie} at {t}")
-                else:
-                    # No Dolby filter found - manually search for Dolby section
-                    if 'dolby cinema' in full_text.lower():
-                        # Find movie sections with Dolby
-                        lines = full_text.split('\n')
-                        current_movie = None
-                        in_dolby = False
-                        
-                        for i, line in enumerate(lines):
-                            line = line.strip()
-                            if not line:
-                                continue
-                            
-                            # Check for movie title
-                            if re.search(r'\(\d{4}\)$', line):
-                                current_movie = line
-                                in_dolby = False
-                                continue
-                            
-                            # Check if this movie has Dolby
-                            if current_movie and 'dolby cinema' in line.lower():
-                                in_dolby = True
-                                continue
-                            
-                            # Get times if in Dolby section
-                            if in_dolby and current_movie:
-                                times = re.findall(r'(\d{1,2}:\d{2}[ap])', line.lower())
+                    # Movie titles typically have year in parens
+                    if re.search(r'\(\d{4}\)$', line):
+                        current_movie = line
+                        continue
+                    
+                    # Look for showtimes (format: 6:00p, 9:00p, etc)
+                    if current_movie:
+                        times = re.findall(r'(\d{1,2}:\d{2}[ap])', line.lower())
+                        for t in times:
+                            showtime = {
+                                'movie': current_movie,
+                                'date': date_str,
+                                'time': t,
+                            }
+                            dolby_showtimes.append(showtime)
+                            print(f"    🎬 {current_movie} at {t}")
+                
+                # Also try to find times using page selectors
+                try:
+                    movie_sections = page.locator('.ShowtimesByTheatre-film').all()
+                    for section in movie_sections:
+                        try:
+                            section_text = section.inner_text()
+                            movie_match = re.search(r'(.+?\(\d{4}\))', section_text)
+                            if movie_match:
+                                movie_name = movie_match.group(1).strip()
+                                times = re.findall(r'(\d{1,2}:\d{2}[ap])', section_text.lower())
                                 for t in times:
-                                    dolby_showtimes.append({
-                                        'movie': current_movie,
+                                    showtime = {
+                                        'movie': movie_name,
                                         'date': date_str,
                                         'time': t,
-                                    })
-                                    print(f"    🎬 {current_movie} at {t}")
-                                
-                                # Reset after finding times
-                                if times:
-                                    in_dolby = False
-                            
-                            # Reset if we hit another format
-                            if any(f in line.lower() for f in ['standard', 'imax', 'prime', 'reald 3d']):
-                                if 'dolby' not in line.lower():
-                                    in_dolby = False
+                                    }
+                                    dolby_showtimes.append(showtime)
+                        except:
+                            pass
+                except:
+                    pass
                 
             except Exception as e:
                 print(f"    Error: {e}")
@@ -171,7 +135,7 @@ def send_notification(movie, time, date):
         resp = requests.post(url, json={
             "value1": movie,
             "value2": f"{date} at {time}",
-            "value3": ""
+            "value3": THEATER_NAME
         }, timeout=10)
         
         if resp.status_code == 200:
@@ -207,7 +171,7 @@ def main():
     seen = load_seen()
     print(f"\n📋 {len(seen)} previously seen showtimes")
     
-    print(f"\n🔍 Checking Fandango for Dolby showtimes...")
+    print(f"\n🔍 Checking AMC for Dolby Cinema showtimes...")
     showtimes = get_dolby_showtimes()
     
     print(f"\n📽️  Found {len(showtimes)} unique Dolby showtimes\n")
