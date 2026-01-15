@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - Cleaner parsing
+AMC Dolby Showtime Monitor - Trusts Dolby filter, validates movie titles
 """
 
 import json
@@ -32,7 +32,7 @@ def is_valid_movie_title(title):
         'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
         'january', 'february', 'march', 'april', 'may', 'june',
         'july', 'august', 'september', 'october', 'november', 'december',
-        'offers', 'gift card', 'sign in', 'join',
+        'offers', 'gift card', 'sign in', 'join', 'theater info',
     ]
     
     title_lower = title.lower()
@@ -40,7 +40,7 @@ def is_valid_movie_title(title):
         if pattern in title_lower:
             return False
     
-    # Must be reasonable length (not too short, not too long)
+    # Must be reasonable length
     name_part = re.sub(r'\s*\(\d{4}\)$', '', title)
     if len(name_part) < 2 or len(name_part) > 100:
         return False
@@ -82,6 +82,7 @@ def get_dolby_showtimes():
                             tab.click()
                             page.wait_for_timeout(2000)
                             dolby_clicked = True
+                            print(" ✓ Dolby filter clicked", end="")
                             break
                     except:
                         continue
@@ -90,14 +91,12 @@ def get_dolby_showtimes():
                     print(" no Dolby filter")
                     continue
                 
-                # Get page text
+                # Get page text and parse movies + times
                 full_text = page.inner_text('body')
                 lines = full_text.split('\n')
                 
-                # Parse: find movie titles, then collect times until next movie
                 current_movie = None
-                found_dolby_label = False
-                day_showtimes = []
+                day_count = 0
                 
                 for line in lines:
                     line = line.strip()
@@ -109,21 +108,13 @@ def get_dolby_showtimes():
                     if movie_match:
                         potential_title = movie_match.group(1)
                         if is_valid_movie_title(potential_title):
-                            # Save previous movie's showtimes if it had Dolby label
-                            if current_movie and found_dolby_label:
-                                day_showtimes.append((current_movie, found_dolby_label))
-                            
                             current_movie = potential_title
-                            found_dolby_label = False
+                        else:
+                            current_movie = None  # Reset if invalid
                         continue
                     
-                    # Check for Dolby Cinema label
-                    if current_movie and 'dolby' in line.lower() and 'cinema' in line.lower():
-                        found_dolby_label = True
-                        continue
-                    
-                    # Check for showtimes (only if we have a movie with Dolby label)
-                    if current_movie and found_dolby_label:
+                    # Look for showtimes if we have a valid movie
+                    if current_movie:
                         times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', line.lower())
                         for t in times:
                             showtime = {
@@ -132,13 +123,12 @@ def get_dolby_showtimes():
                                 'time': t,
                             }
                             dolby_showtimes.append(showtime)
+                            day_count += 1
                 
-                # Count what we found for this day
-                day_count = len([s for s in dolby_showtimes if s['date'] == date_str])
                 if day_count > 0:
-                    print(f" ✓ {day_count} showtimes")
+                    print(f" → {day_count} showtimes")
                 else:
-                    print(" no showtimes")
+                    print(" → no showtimes found")
                 
             except Exception as e:
                 print(f" Error: {e}")
