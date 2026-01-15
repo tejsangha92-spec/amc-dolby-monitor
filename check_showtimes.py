@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMC Dolby Showtime Monitor - Uses Fandango's Dolby Cinema filter tab
+AMC Dolby Showtime Monitor - Verifies each movie has Dolby label
 """
 
 import json
@@ -38,89 +38,131 @@ def get_dolby_showtimes():
             
             url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
             
-            print(f"  Checking {date_str}...")
+            print(f"  Checking {date_str}...", end="")
             
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
                 page.wait_for_timeout(3000)
                 
-                # Click the "DOLBY CINEMA" filter tab
-                dolby_tab_clicked = False
-                try:
-                    # Try multiple selectors for the Dolby Cinema tab
-                    dolby_selectors = [
-                        'text="DOLBY CINEMA"',
-                        'text="Dolby Cinema"',
-                        '[data-format="dolby"]',
-                        'button:has-text("DOLBY")',
-                        'a:has-text("DOLBY")',
-                        '[class*="format"]:has-text("DOLBY")',
-                    ]
-                    
-                    for selector in dolby_selectors:
-                        try:
-                            dolby_tab = page.locator(selector).first
-                            if dolby_tab.is_visible(timeout=2000):
-                                dolby_tab.click()
-                                dolby_tab_clicked = True
-                                page.wait_for_timeout(2000)  # Wait for filter to apply
-                                if day_offset == 0:
-                                    print(f"    ✓ Clicked Dolby filter using: {selector}")
-                                break
-                        except:
-                            continue
-                except Exception as e:
-                    if day_offset == 0:
-                        print(f"    Could not click Dolby tab: {e}")
+                # Look for Dolby Cinema filter tab and click it
+                dolby_clicked = False
+                dolby_selectors = [
+                    'button:has-text("Dolby Cinema")',
+                    'a:has-text("Dolby Cinema")',
+                    'text="DOLBY CINEMA"',
+                    'text="Dolby Cinema"',
+                ]
                 
-                if not dolby_tab_clicked and day_offset == 0:
-                    print("    ⚠ Dolby tab not found - will parse all content")
+                for selector in dolby_selectors:
+                    try:
+                        tab = page.locator(selector).first
+                        if tab.is_visible(timeout=1000):
+                            tab.click()
+                            page.wait_for_timeout(2000)
+                            dolby_clicked = True
+                            break
+                    except:
+                        continue
                 
-                # Get filtered page content
-                full_text = page.inner_text('body')
-                
-                # Debug on first day
-                if day_offset == 0:
-                    print(f"\n--- PAGE AFTER DOLBY FILTER (first 3000 chars) ---")
-                    print(full_text[:3000])
-                    print(f"--- END ---\n")
-                
-                # Check for "no showtimes" message
-                if 'no showtimes' in full_text.lower() or 'no movies' in full_text.lower():
+                if not dolby_clicked:
+                    print(" no Dolby filter")
                     continue
                 
-                # Parse movies and times from the filtered results
-                # Since we clicked Dolby filter, ALL movies shown should be Dolby
-                lines = full_text.split('\n')
-                current_movie = None
+                # Now find movie sections that specifically mention Dolby Cinema
+                # Look for movie containers
+                movie_containers = page.locator('[class*="showtime"], [class*="movie-row"], [class*="MovieRow"], section').all()
                 
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    # Movie title pattern: "Movie Name (Year)"
-                    movie_match = re.match(r'^(.+?)\s*\((\d{4})\)$', line)
-                    if movie_match:
-                        current_movie = line
-                        continue
-                    
-                    # Time pattern: "6:00p" or "9:00p" etc
-                    if current_movie:
-                        # Match standalone times (not part of runtime like "1 hr 50 min")
-                        times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', line.lower())
+                found_count = 0
+                for container in movie_containers:
+                    try:
+                        container_text = container.inner_text()
+                        
+                        # Must have "Dolby" in this specific container
+                        if 'dolby' not in container_text.lower():
+                            continue
+                        
+                        # Extract movie name (pattern: Movie Name (Year))
+                        movie_match = re.search(r'([A-Za-z0-9][A-Za-z0-9\s:,\'\-&\.!?]+?)\s*\((\d{4})\)', container_text)
+                        if not movie_match:
+                            continue
+                        
+                        movie_name = f"{movie_match.group(1).strip()} ({movie_match.group(2)})"
+                        
+                        # Extract times (6:00p, 9:00p, etc)
+                        times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', container_text.lower())
                         
                         for t in times:
                             showtime = {
-                                'movie': current_movie,
+                                'movie': movie_name,
                                 'date': date_str,
                                 'time': t,
                             }
                             dolby_showtimes.append(showtime)
-                            print(f"    🎬 {current_movie} at {t}")
+                            found_count += 1
+                            
+                    except:
+                        continue
+                
+                # Fallback: parse page text if no containers found
+                if found_count == 0:
+                    full_text = page.inner_text('body')
+                    
+                    # Only proceed if page mentions Dolby after the filter
+                    if 'dolby' not in full_text.lower():
+                        print(" no Dolby content")
+                        continue
+                    
+                    # Split into sections by looking for movie patterns
+                    # Each movie section should have: Title (Year) ... Dolby ... times
+                    lines = full_text.split('\n')
+                    current_movie = None
+                    current_section = []
+                    
+                    for line in lines:
+                        line = line.strip()
+                        
+                        # New movie starts
+                        movie_match = re.match(r'^(.+?)\s*\((\d{4})\)$', line)
+                        if movie_match:
+                            # Process previous section if it had Dolby
+                            if current_movie and any('dolby' in l.lower() for l in current_section):
+                                for section_line in current_section:
+                                    times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', section_line.lower())
+                                    for t in times:
+                                        showtime = {
+                                            'movie': current_movie,
+                                            'date': date_str,
+                                            'time': t,
+                                        }
+                                        dolby_showtimes.append(showtime)
+                                        found_count += 1
+                            
+                            # Start new section
+                            current_movie = line
+                            current_section = []
+                        elif current_movie:
+                            current_section.append(line)
+                    
+                    # Don't forget last section
+                    if current_movie and any('dolby' in l.lower() for l in current_section):
+                        for section_line in current_section:
+                            times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', section_line.lower())
+                            for t in times:
+                                showtime = {
+                                    'movie': current_movie,
+                                    'date': date_str,
+                                    'time': t,
+                                }
+                                dolby_showtimes.append(showtime)
+                                found_count += 1
+                
+                if found_count > 0:
+                    print(f" ✓ {found_count} showtimes")
+                else:
+                    print(" no Dolby showtimes")
                 
             except Exception as e:
-                print(f"    Error: {e}")
+                print(f" Error: {e}")
         
         browser.close()
     
