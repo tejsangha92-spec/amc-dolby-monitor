@@ -61,7 +61,7 @@ def get_dolby_showtimes():
         )
         page = context.new_page()
         
-        for day_offset in range(21):  # Check 3 weeks (AMC/Fandango rarely post further out)
+        for day_offset in range(60):  # Check 2 months
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
