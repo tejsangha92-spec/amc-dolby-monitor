@@ -186,10 +186,16 @@ def _format_time(t):
     return f"{hour12}:{minute:02d} {period}"
 
 
-def build_site_html(showtimes, generated_at):
+def build_site_html(showtimes, generated_at, new_keys=frozenset()):
     by_date = {}
     for st in showtimes:
         by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st['time'])
+
+    def chip(st):
+        is_new = f"{st['movie']}|{st['date']}|{st['time']}" in new_keys
+        cls = "chip new" if is_new else "chip"
+        badge = '<span class="badge">NEW</span>' if is_new else ""
+        return f'<span class="{cls}">{badge}{_format_time(st["time"])}</span>'
 
     date_cards = []
     for date_str in sorted(by_date):
@@ -198,7 +204,7 @@ def build_site_html(showtimes, generated_at):
         movie_rows = []
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(t) for t in movies[m])):
             times = sorted(movies[movie], key=_time_sort_key)
-            time_chips = "".join(f'<span class="chip">{_format_time(t)}</span>' for t in times)
+            time_chips = "".join(chip({'movie': movie, 'date': date_str, 'time': t}) for t in times)
             movie_rows.append(
                 f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
                 f'<div class="times">{time_chips}</div></div>'
@@ -212,6 +218,22 @@ def build_site_html(showtimes, generated_at):
 
     body = "".join(date_cards) if date_cards else '<p class="empty">No Dolby Cinema showtimes currently listed.</p>'
 
+    new_items = sorted(
+        (st for st in showtimes if f"{st['movie']}|{st['date']}|{st['time']}" in new_keys),
+        key=lambda st: (st['date'], _time_sort_key(st['time']))
+    )
+    banner = ""
+    if new_items:
+        rows = "".join(
+            f'<div class="new-row"><span class="new-movie">{html.escape(st["movie"])}</span>'
+            f'<span class="new-when">{datetime.strptime(st["date"], "%Y-%m-%d").strftime("%a %b %-d")} '
+            f'· {_format_time(st["time"])}</span></div>'
+            for st in new_items
+        )
+        banner = (
+            f'<section class="banner"><h2>🆕 Just added ({len(new_items)})</h2>{rows}</section>'
+        )
+
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -223,10 +245,12 @@ def build_site_html(showtimes, generated_at):
     color-scheme: light dark;
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
     --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
+    --new-bg: #dcfce7; --new-text: #15803d; --new-card: #f0fdf4; --new-border: #bbf7d0;
   }}
   @media (prefers-color-scheme: dark) {{
     :root {{ --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
-      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31; }}
+      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31;
+      --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26; }}
   }}
   * {{ box-sizing: border-box; }}
   body {{ margin: 0; background: var(--bg); color: var(--text);
@@ -243,6 +267,17 @@ def build_site_html(showtimes, generated_at):
   .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
   .chip {{ background: var(--chip-bg); color: var(--accent); font-size: 0.85rem;
     padding: 4px 10px; border-radius: 999px; }}
+  .chip.new {{ background: var(--new-bg); color: var(--new-text); font-weight: 600;
+    display: inline-flex; align-items: center; gap: 5px; }}
+  .badge {{ background: var(--new-text); color: var(--new-bg); font-size: 0.65rem;
+    font-weight: 700; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 999px; }}
+  .banner {{ background: var(--new-card); border: 1px solid var(--new-border); border-radius: 12px;
+    padding: 18px 20px; }}
+  .banner h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--new-text); }}
+  .new-row {{ display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+    font-size: 0.9rem; }}
+  .new-movie {{ font-weight: 600; }}
+  .new-when {{ color: var(--muted); white-space: nowrap; }}
   .empty {{ text-align: center; color: var(--muted); padding: 40px 0; }}
   footer {{ max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }}
 </style>
@@ -253,6 +288,7 @@ def build_site_html(showtimes, generated_at):
   <div class="sub">{html.escape(THEATER_NAME)} · updated {generated_at.strftime("%b %-d, %Y at %-I:%M %p UTC")}</div>
 </header>
 <main>
+{banner}
 {body}
 </main>
 <footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
@@ -294,14 +330,16 @@ def main():
     print(f"\n📽️  Found {len(showtimes)} unique Dolby showtimes\n")
     
     new_count = 0
+    new_keys = set()
     for st in showtimes:
         key = f"{st['movie']}|{st['date']}|{st['time']}"
         if key not in seen:
             new_count += 1
+            new_keys.add(key)
             print(f"🎬 NEW: {st['movie']} - {st['date']} {st['time']}")
             send_notification(st['movie'], st['time'], st['date'])
             seen[key] = {"date": st['date'], "added": datetime.now().isoformat()}
-    
+
     if new_count == 0:
         if len(showtimes) == 0:
             print("✓ No Dolby showtimes currently listed")
@@ -314,8 +352,9 @@ def main():
     print(f"\n💾 Cache saved ({len(seen)} total)")
 
     SITE_DIR.mkdir(exist_ok=True)
-    (SITE_DIR / "index.html").write_text(build_site_html(showtimes, datetime.now()), encoding="utf-8")
-    print(f"🌐 Website updated ({len(showtimes)} showtimes) → {SITE_DIR / 'index.html'}")
+    site_html = build_site_html(showtimes, datetime.now(), new_keys)
+    (SITE_DIR / "index.html").write_text(site_html, encoding="utf-8")
+    print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new) → {SITE_DIR / 'index.html'}")
 
 
 if __name__ == "__main__":
