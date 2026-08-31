@@ -3,6 +3,7 @@
 AMC Dolby Showtime Monitor - Trusts Dolby filter, validates movie titles
 """
 
+import html
 import json
 import os
 import re
@@ -16,6 +17,7 @@ IFTTT_WEBHOOK_KEYS = [
 ]
 IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
+SITE_DIR = Path("docs")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
@@ -169,6 +171,96 @@ def send_notification(movie, time, date):
             print(f"  ❌ Error ({key[:6]}...): {e}")
 
 
+def _time_sort_key(t):
+    hour, minute, period = re.match(r'(\d{1,2}):(\d{2})([ap])', t).groups()
+    hour = int(hour) % 12
+    if period == 'p':
+        hour += 12
+    return hour, int(minute)
+
+
+def _format_time(t):
+    hour, minute = _time_sort_key(t)
+    period = "AM" if hour < 12 else "PM"
+    hour12 = hour % 12 or 12
+    return f"{hour12}:{minute:02d} {period}"
+
+
+def build_site_html(showtimes, generated_at):
+    by_date = {}
+    for st in showtimes:
+        by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st['time'])
+
+    date_cards = []
+    for date_str in sorted(by_date):
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        movies = by_date[date_str]
+        movie_rows = []
+        for movie in sorted(movies, key=lambda m: min(_time_sort_key(t) for t in movies[m])):
+            times = sorted(movies[movie], key=_time_sort_key)
+            time_chips = "".join(f'<span class="chip">{_format_time(t)}</span>' for t in times)
+            movie_rows.append(
+                f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
+                f'<div class="times">{time_chips}</div></div>'
+            )
+        date_cards.append(
+            f'<section class="day">'
+            f'<h2>{date_obj.strftime("%A, %B %-d")}</h2>'
+            f'{"".join(movie_rows)}'
+            f'</section>'
+        )
+
+    body = "".join(date_cards) if date_cards else '<p class="empty">No Dolby Cinema showtimes currently listed.</p>'
+
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dolby Cinema Showtimes — {html.escape(THEATER_NAME)}</title>
+<style>
+  :root {{
+    color-scheme: light dark;
+    --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
+    --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
+      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31; }}
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{ margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+  header {{ padding: 32px 20px 16px; max-width: 720px; margin: 0 auto; }}
+  header h1 {{ font-size: 1.5rem; margin: 0 0 4px; }}
+  header .sub {{ color: var(--muted); font-size: 0.9rem; }}
+  main {{ max-width: 720px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }}
+  .day {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }}
+  .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); }}
+  .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
+  .movie:first-of-type {{ border-top: none; padding-top: 0; }}
+  .movie-name {{ font-weight: 600; margin-bottom: 6px; }}
+  .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
+  .chip {{ background: var(--chip-bg); color: var(--accent); font-size: 0.85rem;
+    padding: 4px 10px; border-radius: 999px; }}
+  .empty {{ text-align: center; color: var(--muted); padding: 40px 0; }}
+  footer {{ max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Dolby Cinema Showtimes</h1>
+  <div class="sub">{html.escape(THEATER_NAME)} · updated {generated_at.strftime("%b %-d, %Y at %-I:%M %p UTC")}</div>
+</header>
+<main>
+{body}
+</main>
+<footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
+</body>
+</html>
+'''
+
+
 def load_seen():
     if SEEN_FILE.exists():
         try:
@@ -220,6 +312,10 @@ def main():
     
     save_seen(seen)
     print(f"\n💾 Cache saved ({len(seen)} total)")
+
+    SITE_DIR.mkdir(exist_ok=True)
+    (SITE_DIR / "index.html").write_text(build_site_html(showtimes, datetime.now()), encoding="utf-8")
+    print(f"🌐 Website updated ({len(showtimes)} showtimes) → {SITE_DIR / 'index.html'}")
 
 
 if __name__ == "__main__":

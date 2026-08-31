@@ -100,6 +100,19 @@ Examples:
 | AMC Century City 15 | `.../amc-century-city-15` | `amc-century-city-15` |
 | AMC Burbank 16 | `.../amc-burbank-16` | `amc-burbank-16` |
 
+### 6. Enable the Website (optional)
+
+Every run also regenerates a simple showtimes calendar page at `docs/index.html` and commits
+it back to the repo. To have GitHub host it for free:
+
+1. Go to **Settings** → **Pages**
+2. Under **Build and deployment** → **Source**, choose **Deploy from a branch**
+3. Branch: `main`, folder: `/docs` → **Save**
+4. After the next run, your site is live at `https://YOUR_USERNAME.github.io/amc-dolby-monitor/`
+
+Share that URL with anyone — no login or subscription needed, it just always shows the current
+Dolby Cinema lineup for the theater.
+
 ---
 
 ## How It Works
@@ -134,7 +147,7 @@ schedule:
 - GitHub may delay scheduled runs by a few minutes
 
 **No notifications:**
-- Verify `IFTTT_WEBHOOK_KEY` secret is set correctly
+- Verify `IFTTT_WEBHOOK_KEYS` secret is set correctly
 - Check IFTTT app notifications are enabled
 - Run workflow manually and check the logs
 
