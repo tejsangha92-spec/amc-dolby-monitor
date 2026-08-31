@@ -99,7 +99,7 @@ Examples:
 
 ## How It Works
 
-- **Schedule:** Runs every 6 hours automatically (kept well under GitHub's free 2,000 Actions minutes/month for private repos)
+- **Schedule:** Runs every hour automatically (public repo has unlimited free Actions minutes)
 - **State:** Remembers which showtimes it already notified you about (via GitHub Actions cache)
 - **Notifications:** Sends IFTTT webhook for each new Dolby showtime
 - **Cost:** Free (within GitHub Actions free tier)
