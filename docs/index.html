@@ -9,10 +9,12 @@
     color-scheme: light dark;
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
     --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
+    --new-bg: #dcfce7; --new-text: #15803d; --new-card: #f0fdf4; --new-border: #bbf7d0;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
-      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31; }
+      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31;
+      --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
@@ -29,6 +31,17 @@
   .times { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { background: var(--chip-bg); color: var(--accent); font-size: 0.85rem;
     padding: 4px 10px; border-radius: 999px; }
+  .chip.new { background: var(--new-bg); color: var(--new-text); font-weight: 600;
+    display: inline-flex; align-items: center; gap: 5px; }
+  .badge { background: var(--new-text); color: var(--new-bg); font-size: 0.65rem;
+    font-weight: 700; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 999px; }
+  .banner { background: var(--new-card); border: 1px solid var(--new-border); border-radius: 12px;
+    padding: 18px 20px; }
+  .banner h2 { margin: 0 0 12px; font-size: 1.05rem; color: var(--new-text); }
+  .new-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
+    font-size: 0.9rem; }
+  .new-movie { font-weight: 600; }
+  .new-when { color: var(--muted); white-space: nowrap; }
   .empty { text-align: center; color: var(--muted); padding: 40px 0; }
   footer { max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }
 </style>
@@ -36,9 +49,10 @@
 <body>
 <header>
   <h1>🎬 Dolby Cinema Showtimes</h1>
-  <div class="sub">AMC DINE-IN Thousand Oaks 14 · updated Aug 31, 2026 at 9:49 PM UTC</div>
+  <div class="sub">AMC DINE-IN Thousand Oaks 14 · updated Aug 31, 2026 at 10:46 PM UTC</div>
 </header>
 <main>
+
 <section class="day"><h2>Monday, August 31</h2><div class="movie"><div class="movie-name">Spider-Man: Brand New Day (2026)</div><div class="times"><span class="chip">3:00 PM</span><span class="chip">9:30 PM</span></div></div><div class="movie"><div class="movie-name">The Dog Stars (2026)</div><div class="times"><span class="chip">6:30 PM</span></div></div></section><section class="day"><h2>Tuesday, September 1</h2><div class="movie"><div class="movie-name">Spider-Man: Brand New Day (2026)</div><div class="times"><span class="chip">3:00 PM</span><span class="chip">9:30 PM</span></div></div><div class="movie"><div class="movie-name">The Dog Stars (2026)</div><div class="times"><span class="chip">6:30 PM</span></div></div></section><section class="day"><h2>Wednesday, September 2</h2><div class="movie"><div class="movie-name">Spider-Man: Brand New Day (2026)</div><div class="times"><span class="chip">4:00 PM</span><span class="chip">10:30 PM</span></div></div><div class="movie"><div class="movie-name">The Dog Stars (2026)</div><div class="times"><span class="chip">7:30 PM</span></div></div></section><section class="day"><h2>Thursday, September 10</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">2:00 PM</span><span class="chip">4:50 PM</span><span class="chip">7:40 PM</span><span class="chip">10:45 PM</span></div></div></section><section class="day"><h2>Friday, September 11</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">1:20 PM</span><span class="chip">4:30 PM</span><span class="chip">7:40 PM</span><span class="chip">10:45 PM</span></div></div></section><section class="day"><h2>Saturday, September 12</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">1:20 PM</span><span class="chip">4:30 PM</span><span class="chip">7:40 PM</span><span class="chip">10:45 PM</span></div></div></section><section class="day"><h2>Sunday, September 13</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">1:20 PM</span><span class="chip">4:30 PM</span><span class="chip">7:40 PM</span><span class="chip">10:45 PM</span></div></div></section><section class="day"><h2>Monday, September 14</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">1:00 PM</span><span class="chip">4:10 PM</span><span class="chip">7:20 PM</span><span class="chip">10:30 PM</span></div></div></section><section class="day"><h2>Tuesday, September 15</h2><div class="movie"><div class="movie-name">Practical Magic 2 (2026)</div><div class="times"><span class="chip">1:00 PM</span><span class="chip">4:10 PM</span><span class="chip">7:20 PM</span><span class="chip">10:30 PM</span></div></div></section><section class="day"><h2>Wednesday, September 16</h2><div class="movie"><div class="movie-name">The Weight (2026)</div><div class="times"><span class="chip">7:00 PM</span></div></div></section><section class="day"><h2>Thursday, September 17</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">2:00 PM</span><span class="chip">4:30 PM</span><span class="chip">7:00 PM</span><span class="chip">9:30 PM</span></div></div></section><section class="day"><h2>Friday, September 18</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">4:00 PM</span><span class="chip">6:30 PM</span><span class="chip">9:00 PM</span></div></div></section><section class="day"><h2>Saturday, September 19</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">1:30 PM</span><span class="chip">4:00 PM</span><span class="chip">6:30 PM</span><span class="chip">9:00 PM</span></div></div></section><section class="day"><h2>Sunday, September 20</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">1:30 PM</span><span class="chip">4:00 PM</span><span class="chip">6:30 PM</span><span class="chip">9:00 PM</span></div></div></section><section class="day"><h2>Monday, September 21</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">4:00 PM</span><span class="chip">6:30 PM</span><span class="chip">9:00 PM</span></div></div></section><section class="day"><h2>Tuesday, September 22</h2><div class="movie"><div class="movie-name">Resident Evil (2026)</div><div class="times"><span class="chip">4:00 PM</span><span class="chip">6:30 PM</span><span class="chip">9:00 PM</span></div></div></section><section class="day"><h2>Thursday, September 24</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">2:45 PM</span></div></div><div class="movie"><div class="movie-name">Forgotten Island (2026)</div><div class="times"><span class="chip">7:00 PM</span></div></div></section><section class="day"><h2>Friday, September 25</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">12:00 PM</span></div></div></section><section class="day"><h2>Saturday, September 26</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">12:00 PM</span></div></div></section><section class="day"><h2>Sunday, September 27</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">12:00 PM</span></div></div></section><section class="day"><h2>Monday, September 28</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">1:00 PM</span></div></div></section><section class="day"><h2>Tuesday, September 29</h2><div class="movie"><div class="movie-name">Avengers Endgame: Encore (2026)</div><div class="times"><span class="chip">1:00 PM</span></div></div></section><section class="day"><h2>Wednesday, September 30</h2><div class="movie"><div class="movie-name">Verity Early Access Screenings (2026)</div><div class="times"><span class="chip">7:00 PM</span></div></div></section>
 </main>
 <footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
