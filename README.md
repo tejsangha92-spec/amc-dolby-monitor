@@ -64,8 +64,13 @@ In your GitHub repo:
 1. Go to **Settings** → **Secrets and variables** → **Actions**
 
 2. Click **"New repository secret"**:
-   - Name: `IFTTT_WEBHOOK_KEY`
+   - Name: `IFTTT_WEBHOOK_KEYS`
    - Value: Your webhook key from step 3
+
+   **Adding a friend?** They don't need their own fork — they just need their own free IFTTT
+   account + webhook key (steps 1-4 above, on their own IFTTT account). Then edit the
+   `IFTTT_WEBHOOK_KEYS` secret to hold both keys comma-separated, e.g. `abc123,xyz789`. Every
+   run notifies everyone listed.
 
 3. Click **"Variables"** tab → **"New repository variable"**:
    - Name: `THEATER_SLUG`
