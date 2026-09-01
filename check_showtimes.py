@@ -19,6 +19,7 @@ SITE_DIR = Path("docs")
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
+AMC_THEATER_URL = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-thousand-oaks-14/showtimes"
 
 
 def is_valid_movie_title(title):
@@ -271,6 +272,9 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
   header {{ padding: 32px 20px 16px; max-width: 720px; margin: 0 auto; }}
   header h1 {{ font-size: 1.5rem; margin: 0 0 4px; }}
+  .amc-link {{ display: inline-block; margin-top: 10px; font-size: 0.85rem; color: var(--accent);
+    text-decoration: none; font-weight: 600; }}
+  .amc-link:hover {{ text-decoration: underline; }}
   header .sub {{ color: var(--muted); font-size: 0.9rem; }}
   main {{ max-width: 720px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }}
   .day {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }}
@@ -307,6 +311,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
   <h1>🎬 Dolby Cinema Showtimes</h1>
   <div class="sub">{html.escape(THEATER_NAME)} · updated {generated_at.strftime("%b %-d, %Y at %-I:%M %p UTC")}</div>
   <div class="legend"><span><i class="available"></i>Tickets on sale</span><span><i class="restricted"></i>Not yet available</span></div>
+  <a class="amc-link" href="{AMC_THEATER_URL}" target="_blank" rel="noopener">View all showtimes on AMC Theatres →</a>
 </header>
 <main>
 {banner}
