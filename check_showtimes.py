@@ -93,40 +93,51 @@ def get_dolby_showtimes():
                     print(" no Dolby filter")
                     continue
                 
-                # Get page text and parse movies + times
-                full_text = page.inner_text('body')
-                lines = full_text.split('\n')
-                
-                current_movie = None
-                day_count = 0
-                
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    # Check for movie title (ends with year in parens)
-                    movie_match = re.match(r'^(.+\(\d{4}\))$', line)
-                    if movie_match:
-                        potential_title = movie_match.group(1)
-                        if is_valid_movie_title(potential_title):
-                            current_movie = potential_title
-                        else:
-                            current_movie = None  # Reset if invalid
-                        continue
-                    
-                    # Look for showtimes if we have a valid movie
-                    if current_movie:
-                        times = re.findall(r'\b(\d{1,2}:\d{2}[ap])\b', line.lower())
-                        for t in times:
-                            showtime = {
-                                'movie': current_movie,
-                                'date': date_str,
-                                'time': t,
+                # Walk the DOM directly so we can read each showtime button's
+                # available/restricted state, not just its visible text.
+                day_results = page.evaluate(r"""
+                    () => {
+                        const isVisible = (el) => {
+                            const style = getComputedStyle(el);
+                            return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+                        };
+                        const results = [];
+                        for (const movieEl of document.querySelectorAll('li.shared-movie-showtimes')) {
+                            if (!isVisible(movieEl)) continue;
+                            const titleEl = movieEl.querySelector('.shared-movie-showtimes__movie-title-link');
+                            if (!titleEl) continue;
+                            const title = titleEl.textContent.trim();
+                            for (const btn of movieEl.querySelectorAll('.showtime-btn')) {
+                                if (!isVisible(btn)) continue;
+                                const text = btn.textContent.trim();
+                                if (!/^\d{1,2}:\d{2}\s*[ap]/i.test(text)) continue;
+                                results.push({
+                                    movie: title,
+                                    time: text,
+                                    available: btn.className.includes('showtime-btn--available'),
+                                });
                             }
-                            dolby_showtimes.append(showtime)
-                            day_count += 1
-                
+                        }
+                        return results;
+                    }
+                """)
+
+                day_count = 0
+                for item in day_results:
+                    if not is_valid_movie_title(item['movie']):
+                        continue
+                    t_match = re.match(r'(\d{1,2}:\d{2})\s*([ap])', item['time'], re.I)
+                    if not t_match:
+                        continue
+                    showtime = {
+                        'movie': item['movie'],
+                        'date': date_str,
+                        'time': f"{t_match.group(1)}{t_match.group(2).lower()}",
+                        'available': item['available'],
+                    }
+                    dolby_showtimes.append(showtime)
+                    day_count += 1
+
                 if day_count > 0:
                     print(f" → {day_count} showtimes")
                 else:
@@ -186,22 +197,22 @@ def _format_time(t):
 def build_site_html(showtimes, generated_at, new_keys=frozenset()):
     by_date = {}
     for st in showtimes:
-        by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st['time'])
+        by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st)
 
     def chip(st):
         is_new = f"{st['movie']}|{st['date']}|{st['time']}" in new_keys
-        cls = "chip new" if is_new else "chip"
+        avail_cls = "available" if st.get('available') else "restricted"
         badge = '<span class="badge">NEW</span>' if is_new else ""
-        return f'<span class="{cls}">{badge}{_format_time(st["time"])}</span>'
+        return f'<span class="chip {avail_cls}">{badge}{_format_time(st["time"])}</span>'
 
     date_cards = []
     for date_str in sorted(by_date):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
         movies = by_date[date_str]
         movie_rows = []
-        for movie in sorted(movies, key=lambda m: min(_time_sort_key(t) for t in movies[m])):
-            times = sorted(movies[movie], key=_time_sort_key)
-            time_chips = "".join(chip({'movie': movie, 'date': date_str, 'time': t}) for t in times)
+        for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
+            sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
+            time_chips = "".join(chip(s) for s in sts)
             movie_rows.append(
                 f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
                 f'<div class="times">{time_chips}</div></div>'
@@ -243,11 +254,17 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
     --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
     --new-bg: #dcfce7; --new-text: #15803d; --new-card: #f0fdf4; --new-border: #bbf7d0;
+    --avail-bg: #e36600; --avail-text: #ffffff;
+    --restricted-bg: #e5e7eb; --restricted-text: #6b7280;
+    --badge-bg: rgba(255, 255, 255, 0.92); --badge-text: #111827;
   }}
   @media (prefers-color-scheme: dark) {{
     :root {{ --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
       --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31;
-      --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26; }}
+      --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26;
+      --avail-bg: #f2790a; --avail-text: #17110a;
+      --restricted-bg: #2c2c31; --restricted-text: #8a8a90;
+      --badge-bg: rgba(0, 0, 0, 0.55); --badge-text: #ffffff; }}
   }}
   * {{ box-sizing: border-box; }}
   body {{ margin: 0; background: var(--bg); color: var(--text);
@@ -262,12 +279,18 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
   .movie:first-of-type {{ border-top: none; padding-top: 0; }}
   .movie-name {{ font-weight: 600; margin-bottom: 6px; }}
   .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-  .chip {{ background: var(--chip-bg); color: var(--accent); font-size: 0.85rem;
-    padding: 4px 10px; border-radius: 999px; }}
-  .chip.new {{ background: var(--new-bg); color: var(--new-text); font-weight: 600;
+  .chip {{ font-size: 0.85rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
     display: inline-flex; align-items: center; gap: 5px; }}
-  .badge {{ background: var(--new-text); color: var(--new-bg); font-size: 0.65rem;
+  .chip.available {{ background: var(--avail-bg); color: var(--avail-text); }}
+  .chip.restricted {{ background: var(--restricted-bg); color: var(--restricted-text);
+    font-weight: 500; opacity: 0.85; }}
+  .badge {{ background: var(--badge-bg); color: var(--badge-text); font-size: 0.65rem;
     font-weight: 700; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 999px; }}
+  .legend {{ display: flex; gap: 14px; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }}
+  .legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
+  .legend i {{ width: 9px; height: 9px; border-radius: 999px; display: inline-block; }}
+  .legend i.available {{ background: var(--avail-bg); }}
+  .legend i.restricted {{ background: var(--restricted-bg); }}
   .banner {{ background: var(--new-card); border: 1px solid var(--new-border); border-radius: 12px;
     padding: 18px 20px; }}
   .banner h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--new-text); }}
@@ -283,6 +306,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
 <header>
   <h1>🎬 Dolby Cinema Showtimes</h1>
   <div class="sub">{html.escape(THEATER_NAME)} · updated {generated_at.strftime("%b %-d, %Y at %-I:%M %p UTC")}</div>
+  <div class="legend"><span><i class="available"></i>Tickets on sale</span><span><i class="restricted"></i>Not yet available</span></div>
 </header>
 <main>
 {banner}
