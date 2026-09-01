@@ -22,4 +22,4 @@ jobs:
           playwright install-deps chromium
 
       - name: Dump showtime element styling
-        run: python debug_dom.py
+        run: python debug_dom.py 29

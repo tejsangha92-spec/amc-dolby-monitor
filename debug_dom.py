@@ -2,6 +2,7 @@
 """Throwaway diagnostic: dump styling info for showtime elements on Fandango's page."""
 
 import json
+import sys
 from datetime import datetime, timedelta
 
 from playwright.sync_api import sync_playwright
@@ -10,7 +11,8 @@ FANDANGO_THEATER_ID = "aavib"
 
 
 def main():
-    date = datetime.now() + timedelta(days=1)
+    offset = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    date = datetime.now() + timedelta(days=offset)
     date_str = date.strftime("%Y-%m-%d")
     url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
 
