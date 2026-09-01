@@ -41,34 +41,53 @@ def main():
         results = page.evaluate(r"""
             () => {
                 const timeRe = /^\d{1,2}:\d{2}\s*[ap]\.?m?\.?$/i;
+                const titleRe = /\(\d{4}\)$/;
                 const nodes = Array.from(document.querySelectorAll('body *'));
-                const leaves = nodes.filter(el => el.children.length === 0 && timeRe.test(el.textContent.trim()));
-                return leaves.slice(0, 40).map(el => {
-                    const style = getComputedStyle(el);
-                    const parent = el.parentElement;
-                    const pstyle = parent ? getComputedStyle(parent) : null;
-                    return {
-                        tag: el.tagName,
-                        text: el.textContent.trim(),
-                        class: el.className,
-                        color: style.color,
-                        bg: style.backgroundColor,
-                        opacity: style.opacity,
-                        pointerEvents: style.pointerEvents,
-                        ariaDisabled: el.getAttribute('aria-disabled'),
-                        disabled: el.disabled === true,
-                        parentTag: parent ? parent.tagName : null,
-                        parentClass: parent ? parent.className : null,
-                        parentColor: pstyle ? pstyle.color : null,
-                        parentBg: pstyle ? pstyle.backgroundColor : null,
-                        href: el.tagName === 'A' ? el.href : (parent && parent.tagName === 'A' ? parent.href : null),
-                    };
-                });
+
+                const btn = nodes
+                    .filter(el => el.children.length === 0 && timeRe.test(el.textContent.trim()))
+                    .slice(0, 10)
+                    .map(el => {
+                        const chain = [];
+                        let cur = el;
+                        for (let i = 0; i < 8 && cur; i++) {
+                            chain.push({tag: cur.tagName, class: cur.className, id: cur.id || null});
+                            cur = cur.parentElement;
+                        }
+                        return {
+                            kind: 'showtime',
+                            text: el.textContent.trim(),
+                            class: el.className,
+                            ancestorChain: chain,
+                        };
+                    });
+
+                const titles = nodes
+                    .filter(el => el.children.length === 0 && titleRe.test(el.textContent.trim()))
+                    .slice(0, 10)
+                    .map(el => {
+                        const chain = [];
+                        let cur = el;
+                        for (let i = 0; i < 8 && cur; i++) {
+                            chain.push({tag: cur.tagName, class: cur.className, id: cur.id || null});
+                            cur = cur.parentElement;
+                        }
+                        return {
+                            kind: 'title',
+                            text: el.textContent.trim(),
+                            class: el.className,
+                            ancestorChain: chain,
+                        };
+                    });
+
+                return {btn, titles};
             }
         """)
 
-        print(f"Found {len(results)} time-like leaf elements")
-        for r in results:
+        print(f"Found {len(results['btn'])} showtime elements, {len(results['titles'])} title elements")
+        for r in results['titles']:
+            print(json.dumps(r))
+        for r in results['btn']:
             print(json.dumps(r))
 
         browser.close()
