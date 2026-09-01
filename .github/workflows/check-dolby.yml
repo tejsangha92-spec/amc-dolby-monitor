@@ -43,13 +43,13 @@ jobs:
       - name: Send test notification
         if: github.event.inputs.send_test_notification == 'true'
         env:
-          IFTTT_WEBHOOK_KEYS: ${{ secrets.IFTTT_WEBHOOK_KEYS }}
+          IFTTT_WEBHOOK_KEY: ${{ secrets.IFTTT_WEBHOOK_KEY }}
         run: python check_showtimes.py --test
 
       - name: Check for new Dolby showtimes
         if: github.event.inputs.send_test_notification != 'true'
         env:
-          IFTTT_WEBHOOK_KEYS: ${{ secrets.IFTTT_WEBHOOK_KEYS }}
+          IFTTT_WEBHOOK_KEY: ${{ secrets.IFTTT_WEBHOOK_KEY }}
         run: python check_showtimes.py
 
       - name: Publish updated website

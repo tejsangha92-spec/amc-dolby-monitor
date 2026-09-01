@@ -12,9 +12,7 @@ from pathlib import Path
 
 import requests
 
-IFTTT_WEBHOOK_KEYS = [
-    k.strip() for k in os.environ.get("IFTTT_WEBHOOK_KEYS", "").split(",") if k.strip()
-]
+IFTTT_WEBHOOK_KEY = os.environ.get("IFTTT_WEBHOOK_KEY", "")
 IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 SITE_DIR = Path("docs")
@@ -152,23 +150,22 @@ def get_dolby_showtimes():
 
 
 def send_notification(movie, time, date):
-    if not IFTTT_WEBHOOK_KEYS:
+    if not IFTTT_WEBHOOK_KEY:
         print(f"  [DRY RUN] {movie} - {date} {time}")
         return
 
-    for key in IFTTT_WEBHOOK_KEYS:
-        url = f"https://maker.ifttt.com/trigger/{IFTTT_EVENT_NAME}/with/key/{key}"
-        try:
-            resp = requests.post(url, json={
-                "value1": movie,
-                "value2": f"{date} at {time}",
-                "value3": THEATER_NAME
-            }, timeout=10)
+    url = f"https://maker.ifttt.com/trigger/{IFTTT_EVENT_NAME}/with/key/{IFTTT_WEBHOOK_KEY}"
+    try:
+        resp = requests.post(url, json={
+            "value1": movie,
+            "value2": f"{date} at {time}",
+            "value3": THEATER_NAME
+        }, timeout=10)
 
-            if resp.status_code == 200:
-                print(f"  ✅ Notified ({key[:6]}...): {movie} - {time}")
-        except Exception as e:
-            print(f"  ❌ Error ({key[:6]}...): {e}")
+        if resp.status_code == 200:
+            print(f"  ✅ Notified: {movie} - {time}")
+    except Exception as e:
+        print(f"  ❌ Error: {e}")
 
 
 def _time_sort_key(t):
