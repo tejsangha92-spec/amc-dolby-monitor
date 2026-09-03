@@ -224,6 +224,50 @@ def get_dolby_showtimes():
     return unique
 
 
+def get_all_theater_movies():
+    """All movies playing at the theater today, across every format (not just
+    Dolby Cinema) — used for the "Now in Theatres" section."""
+    from playwright.sync_api import sync_playwright
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
+
+    titles = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        page = context.new_page()
+        try:
+            page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+
+            raw_titles = page.evaluate(r"""
+                () => {
+                    const isVisible = (el) => {
+                        const style = getComputedStyle(el);
+                        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+                    };
+                    const titles = [];
+                    for (const movieEl of document.querySelectorAll('li.shared-movie-showtimes')) {
+                        if (!isVisible(movieEl)) continue;
+                        const titleEl = movieEl.querySelector('.shared-movie-showtimes__movie-title-link');
+                        if (!titleEl) continue;
+                        titles.push(titleEl.textContent.trim());
+                    }
+                    return titles;
+                }
+            """)
+            titles = [t for t in raw_titles if is_valid_movie_title(t)]
+        except Exception as e:
+            print(f"  ⚠️  Full theater lineup lookup failed: {e}")
+        browser.close()
+
+    return sorted(set(titles))
+
+
 def _parse_dolby_releases(text, today, cutoff):
     """Extract "Title / format tags / Mon DD, YYYY" blocks from the Dolby
     releases page's plain text, keeping only today..cutoff (inclusive)."""
@@ -331,7 +375,8 @@ def _metascore_badge(score, movie):
     )
 
 
-def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None, upcoming_releases=None):
+def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
+                     upcoming_releases=None, now_playing_titles=None):
     metascores = metascores or {}
     upcoming_releases = upcoming_releases or []
     by_date = {}
@@ -382,8 +427,9 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
             f'<section class="banner"><h2>🆕 Just added ({len(new_items)})</h2>{rows}</section>'
         )
 
-    today_str = generated_at.strftime("%Y-%m-%d")
-    now_playing_titles = sorted({st['movie'] for st in showtimes if st['date'] == today_str})
+    if now_playing_titles is None:
+        today_str = generated_at.strftime("%Y-%m-%d")
+        now_playing_titles = sorted({st['movie'] for st in showtimes if st['date'] == today_str})
     now_playing_section = ""
     if now_playing_titles:
         rows = "".join(
@@ -581,7 +627,11 @@ def main():
     save_seen(seen)
     print(f"\n💾 Cache saved ({len(seen)} total)")
 
-    movie_titles = sorted({st['movie'] for st in showtimes})
+    print(f"\n🎟️  Checking full theater lineup (all formats) for Now in Theatres...")
+    now_playing_titles = get_all_theater_movies()
+    print(f"🎬 {len(now_playing_titles)} movies currently playing at {THEATER_NAME}")
+
+    movie_titles = sorted(set(st['movie'] for st in showtimes) | set(now_playing_titles))
     metascores = update_metascores(movie_titles)
     if OMDB_API_KEY:
         scored = sum(1 for v in metascores.values() if v is not None)
@@ -592,7 +642,7 @@ def main():
     print(f"📅 {len(upcoming_releases)} releases in the next 3 months")
 
     SITE_DIR.mkdir(exist_ok=True)
-    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores, upcoming_releases)
+    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores, upcoming_releases, now_playing_titles)
     (SITE_DIR / "index.html").write_text(site_html, encoding="utf-8")
     print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new) → {SITE_DIR / 'index.html'}")
 
