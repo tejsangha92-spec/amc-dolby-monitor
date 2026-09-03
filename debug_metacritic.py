@@ -22,26 +22,31 @@ def main():
             print(f"=== {title} -> {url} ===")
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(5000)
                 print("Final URL:", page.url)
                 print("Page title:", page.title())
 
                 links = page.evaluate(r"""
                     () => {
+                        const prefix = 'https://www.metacritic.com/movie/';
                         const anchors = Array.from(document.querySelectorAll('a[href*="/movie/"]'));
                         const seen = new Set();
                         const out = [];
                         for (const a of anchors) {
+                            if (a.href.length <= prefix.length) continue;
                             if (seen.has(a.href)) continue;
                             seen.add(a.href);
                             out.push({href: a.href, text: a.textContent.trim().slice(0, 80)});
-                            if (out.length >= 8) break;
                         }
                         return out;
                     }
                 """)
-                for l in links:
+                print(f"Found {len(links)} movie-detail links:")
+                for l in links[:15]:
                     print(json.dumps(l))
+
+                body_len = page.evaluate("document.body.innerText.length")
+                print("Body text length:", body_len)
             except Exception as e:
                 print("ERROR:", e)
             print()
