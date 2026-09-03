@@ -2,6 +2,8 @@
 """Throwaway diagnostic: inspect the Dolby Cinema theatrical releases page."""
 
 import json
+import re
+from datetime import datetime
 
 from playwright.sync_api import sync_playwright
 
@@ -23,9 +25,33 @@ def main():
         print("=== TITLE ===")
         print(page.title())
 
-        print("=== BODY TEXT (first 4000 chars) ===")
         text = page.inner_text('body')
-        print(text[:4000])
+        print(f"=== BODY TEXT LENGTH: {len(text)} chars ===")
+
+        # Parse "Title \n\t Dolby Atmos? \n\t Dolby Vision? \n\t Mon DD, YYYY" blocks
+        lines = [l.strip() for l in text.split('\n')]
+        entries = []
+        date_re = re.compile(r'^[A-Z][a-z]{2} \d{2}, \d{4}$')
+        i = 0
+        while i < len(lines):
+            if date_re.match(lines[i]):
+                # walk backwards over blank lines / format tags to find the title
+                j = i - 1
+                formats = []
+                while j >= 0 and lines[j] in ('', 'Dolby Atmos', 'Dolby Vision', 'Dolby Cinema'):
+                    if lines[j]:
+                        formats.append(lines[j])
+                    j -= 1
+                if j >= 0 and lines[j]:
+                    entries.append({'title': lines[j], 'date': lines[i], 'formats': formats})
+            i += 1
+
+        print(f"=== PARSED {len(entries)} ENTRIES ===")
+        dates = [datetime.strptime(e['date'], '%b %d, %Y') for e in entries]
+        if dates:
+            print(f"Range: {min(dates).date()} to {max(dates).date()}")
+        for e in entries:
+            print(json.dumps(e))
 
         print("=== POTENTIAL REPEATING CARD STRUCTURE ===")
         # Look for elements that repeat with similar class names, a common
