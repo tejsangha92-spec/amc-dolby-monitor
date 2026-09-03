@@ -372,6 +372,20 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
             f'<section class="banner"><h2>🆕 Just added ({len(new_items)})</h2>{rows}</section>'
         )
 
+    today_str = generated_at.strftime("%Y-%m-%d")
+    now_playing_titles = sorted({st['movie'] for st in showtimes if st['date'] == today_str})
+    now_playing_section = ""
+    if now_playing_titles:
+        rows = "".join(
+            f'<div class="now-row"><span class="now-title">{html.escape(t)}</span>'
+            f'{_metascore_badge(metascores.get(t))}</div>'
+            for t in now_playing_titles
+        )
+        now_playing_section = (
+            f'<section class="now-playing"><h2>🎟️ Now in Theatres</h2>'
+            f'<div class="now-list">{rows}</div></section>'
+        )
+
     releases_section = ""
     if upcoming_releases:
         rows = "".join(
@@ -460,6 +474,13 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     font-size: 0.9rem; }}
   .new-movie {{ font-weight: 600; }}
   .new-when {{ color: var(--muted); white-space: nowrap; }}
+  .now-playing {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; }}
+  .now-playing h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
+  .now-row {{ display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 0; border-top: 1px solid var(--border); font-size: 0.9rem; }}
+  .now-row:first-child {{ border-top: none; }}
+  .now-title {{ font-weight: 600; }}
   .releases {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
   .releases h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
@@ -485,6 +506,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
 {body}
 </div>
 <aside class="sidebar">
+{now_playing_section}
 {releases_section}
 </aside>
 </main>
