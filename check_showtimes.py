@@ -24,6 +24,7 @@ METASCORE_REFRESH_DAYS = 7  # re-check unscored/stale movies this often
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
 AMC_THEATER_URL = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-thousand-oaks-14/showtimes"
+DOLBY_RELEASES_URL = "https://professional.dolby.com/cinema/theatrical-releases/"
 
 
 def is_valid_movie_title(title):
@@ -218,8 +219,65 @@ def get_dolby_showtimes():
         if key not in seen:
             seen.add(key)
             unique.append(st)
-    
+
     return unique
+
+
+def _parse_dolby_releases(text, today, cutoff):
+    """Extract "Title / format tags / Mon DD, YYYY" blocks from the Dolby
+    releases page's plain text, keeping only today..cutoff (inclusive)."""
+    lines = [l.strip() for l in text.split('\n')]
+    date_re = re.compile(r'^[A-Z][a-z]{2} \d{2}, \d{4}$')
+    releases = []
+    seen = set()
+    i = 0
+    while i < len(lines):
+        if date_re.match(lines[i]):
+            j = i - 1
+            while j >= 0 and lines[j] in ('', 'Dolby Atmos', 'Dolby Vision', 'Dolby Cinema'):
+                j -= 1
+            if j >= 0 and lines[j]:
+                try:
+                    date_obj = datetime.strptime(lines[i], '%b %d, %Y').date()
+                except ValueError:
+                    date_obj = None
+                if date_obj and today <= date_obj <= cutoff:
+                    key = (lines[j], date_obj)
+                    if key not in seen:
+                        seen.add(key)
+                        releases.append({'title': lines[j], 'date': date_obj.strftime('%Y-%m-%d')})
+        i += 1
+
+    releases.sort(key=lambda r: r['date'])
+    return releases
+
+
+def get_upcoming_dolby_releases(days_ahead=90):
+    """Dolby's own nationwide release lineup (not specific to any one
+    theater), filtered to the next `days_ahead` days."""
+    from playwright.sync_api import sync_playwright
+
+    today = datetime.now().date()
+    cutoff = today + timedelta(days=days_ahead)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        page = context.new_page()
+        try:
+            page.goto(DOLBY_RELEASES_URL, timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+            text = page.inner_text('body')
+        except Exception as e:
+            print(f"  ⚠️  Dolby releases lookup failed: {e}")
+            browser.close()
+            return []
+        browser.close()
+
+    return _parse_dolby_releases(text, today, cutoff)
 
 
 def send_notification(movie, time, date):
@@ -263,8 +321,9 @@ def _metascore_badge(score):
     return f'<span class="score {cls}" title="Metascore">{score}</span>'
 
 
-def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None):
+def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None, upcoming_releases=None):
     metascores = metascores or {}
+    upcoming_releases = upcoming_releases or []
     by_date = {}
     for st in showtimes:
         by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st)
@@ -311,6 +370,24 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         )
         banner = (
             f'<section class="banner"><h2>🆕 Just added ({len(new_items)})</h2>{rows}</section>'
+        )
+
+    releases_section = ""
+    if upcoming_releases:
+        rows = "".join(
+            f'<div class="release-row">'
+            f'<span class="release-date">{datetime.strptime(r["date"], "%Y-%m-%d").strftime("%b %-d")}</span>'
+            f'<span class="release-title">{html.escape(r["title"])}</span>'
+            f'</div>'
+            for r in upcoming_releases
+        )
+        releases_section = (
+            f'<section class="releases">'
+            f'<h2>🎬 Coming to Dolby Cinema (next 3 months)</h2>'
+            f'<p class="releases-note">Dolby\'s nationwide release lineup — not every title will '
+            f'necessarily play at {html.escape(THEATER_NAME)}.</p>'
+            f'<div class="release-list">{rows}</div>'
+            f'</section>'
         )
 
     return f'''<!doctype html>
@@ -376,6 +453,14 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     font-size: 0.9rem; }}
   .new-movie {{ font-weight: 600; }}
   .new-when {{ color: var(--muted); white-space: nowrap; }}
+  .releases {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; }}
+  .releases h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
+  .releases-note {{ margin: 0 0 14px; font-size: 0.8rem; color: var(--muted); }}
+  .release-row {{ display: flex; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border);
+    font-size: 0.9rem; }}
+  .release-row:first-child {{ border-top: none; }}
+  .release-date {{ color: var(--accent); font-weight: 600; width: 52px; flex-shrink: 0; }}
   .empty {{ text-align: center; color: var(--muted); padding: 40px 0; }}
   footer {{ max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }}
 </style>
@@ -390,6 +475,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
 <main>
 {banner}
 {body}
+{releases_section}
 </main>
 <footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
 </body>
@@ -457,8 +543,12 @@ def main():
         scored = sum(1 for v in metascores.values() if v is not None)
         print(f"🏆 Metascores: {scored}/{len(movie_titles)} movies")
 
+    print(f"\n🎬 Checking upcoming Dolby Cinema releases...")
+    upcoming_releases = get_upcoming_dolby_releases()
+    print(f"📅 {len(upcoming_releases)} releases in the next 3 months")
+
     SITE_DIR.mkdir(exist_ok=True)
-    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores)
+    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores, upcoming_releases)
     (SITE_DIR / "index.html").write_text(site_html, encoding="utf-8")
     print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new) → {SITE_DIR / 'index.html'}")
 
