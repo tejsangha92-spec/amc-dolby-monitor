@@ -417,13 +417,20 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   * {{ box-sizing: border-box; }}
   body {{ margin: 0; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-  header {{ padding: 32px 20px 16px; max-width: 720px; margin: 0 auto; }}
+  header {{ padding: 32px 20px 16px; max-width: 1080px; margin: 0 auto; }}
   header h1 {{ font-size: 1.5rem; margin: 0 0 4px; }}
   .amc-link {{ display: inline-block; margin-top: 10px; font-size: 0.85rem; color: var(--accent);
     text-decoration: none; font-weight: 600; }}
   .amc-link:hover {{ text-decoration: underline; }}
   header .sub {{ color: var(--muted); font-size: 0.9rem; }}
-  main {{ max-width: 720px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 16px; }}
+  main {{ max-width: 1080px; margin: 0 auto; padding: 8px 20px 60px;
+    display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }}
+  .primary {{ display: grid; gap: 16px; min-width: 0; }}
+  .sidebar {{ display: grid; gap: 16px; position: sticky; top: 20px; }}
+  @media (max-width: 860px) {{
+    main {{ grid-template-columns: 1fr; }}
+    .sidebar {{ position: static; }}
+  }}
   .day {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }}
   .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); }}
   .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
@@ -462,7 +469,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .release-row:first-child {{ border-top: none; }}
   .release-date {{ color: var(--accent); font-weight: 600; width: 52px; flex-shrink: 0; }}
   .empty {{ text-align: center; color: var(--muted); padding: 40px 0; }}
-  footer {{ max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }}
+  footer {{ max-width: 1080px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 0.8rem; }}
 </style>
 </head>
 <body>
@@ -473,9 +480,13 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   <a class="amc-link" href="{AMC_THEATER_URL}" target="_blank" rel="noopener">View all showtimes on AMC Theatres →</a>
 </header>
 <main>
+<div class="primary">
 {banner}
 {body}
+</div>
+<aside class="sidebar">
 {releases_section}
+</aside>
 </main>
 <footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
 </body>
