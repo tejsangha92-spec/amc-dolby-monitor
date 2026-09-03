@@ -35,7 +35,9 @@ jobs:
       - name: Restore seen showtimes cache
         uses: actions/cache@v4
         with:
-          path: seen_dolby_showtimes.json
+          path: |
+            seen_dolby_showtimes.json
+            metascore_cache.json
           key: seen-showtimes-${{ github.run_id }}
           restore-keys: |
             seen-showtimes-
@@ -50,6 +52,7 @@ jobs:
         if: github.event.inputs.send_test_notification != 'true'
         env:
           IFTTT_WEBHOOK_KEY: ${{ secrets.IFTTT_WEBHOOK_KEY }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
         run: python check_showtimes.py
 
       - name: Publish updated website

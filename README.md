@@ -67,6 +67,14 @@ In your GitHub repo:
    - Name: `IFTTT_WEBHOOK_KEY`
    - Value: Your webhook key from step 3
 
+   **Want Metacritic scores on the website?** (optional) Get a free API key at
+   https://www.omdbapi.com/apikey.aspx (check your email to activate it), then add another
+   secret:
+   - Name: `OMDB_API_KEY`
+   - Value: Your OMDb key
+
+   Without this secret, the site just skips showing scores — everything else still works.
+
 3. Click **"Variables"** tab → **"New repository variable"**:
    - Name: `THEATER_SLUG`
    - Value: `amc-dine-in-thousand-oaks-14` (or your theater—see below)

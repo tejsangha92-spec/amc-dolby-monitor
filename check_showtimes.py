@@ -17,6 +17,10 @@ IFTTT_EVENT_NAME = "new_dolby_showtime"
 SEEN_FILE = Path("seen_dolby_showtimes.json")
 SITE_DIR = Path("docs")
 
+OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
+METASCORE_FILE = Path("metascore_cache.json")
+METASCORE_REFRESH_DAYS = 7  # re-check unscored/stale movies this often
+
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
 AMC_THEATER_URL = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-thousand-oaks-14/showtimes"
@@ -47,8 +51,65 @@ def is_valid_movie_title(title):
     name_part = re.sub(r'\s*\(\d{4}\)$', '', title)
     if len(name_part) < 2 or len(name_part) > 100:
         return False
-    
+
     return True
+
+
+def load_metascores():
+    if METASCORE_FILE.exists():
+        try:
+            with open(METASCORE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_metascores(cache):
+    with open(METASCORE_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
+
+def fetch_metascore(movie):
+    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown."""
+    match = re.match(r'^(.+?)\s*\((\d{4})\)$', movie)
+    title, year = (match.group(1), match.group(2)) if match else (movie, None)
+
+    params = {"t": title, "apikey": OMDB_API_KEY}
+    if year:
+        params["y"] = year
+
+    try:
+        resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
+        data = resp.json()
+        score = data.get("Metascore")
+        if score and score.isdigit():
+            return int(score)
+    except Exception as e:
+        print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
+
+    return None
+
+
+def update_metascores(movie_titles):
+    """Fetch/refresh Metascores for the given movies, using a local cache to
+    avoid re-querying OMDb every run. Returns {movie: score_or_None}."""
+    if not OMDB_API_KEY:
+        return {}
+
+    cache = load_metascores()
+    today = datetime.now().strftime("%Y-%m-%d")
+    stale_cutoff = (datetime.now() - timedelta(days=METASCORE_REFRESH_DAYS)).strftime("%Y-%m-%d")
+
+    for movie in movie_titles:
+        entry = cache.get(movie)
+        needs_fetch = entry is None or entry.get("checked", "") < stale_cutoff
+        if needs_fetch:
+            score = fetch_metascore(movie)
+            cache[movie] = {"score": score, "checked": today}
+
+    save_metascores(cache)
+    return {movie: cache[movie]["score"] for movie in movie_titles if movie in cache}
 
 
 def get_dolby_showtimes():
@@ -195,7 +256,15 @@ def _format_time(t):
     return f"{hour12}:{minute:02d} {period}"
 
 
-def build_site_html(showtimes, generated_at, new_keys=frozenset()):
+def _metascore_badge(score):
+    if score is None:
+        return ""
+    cls = "score-good" if score >= 61 else ("score-mixed" if score >= 40 else "score-bad")
+    return f'<span class="score {cls}" title="Metascore">{score}</span>'
+
+
+def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None):
+    metascores = metascores or {}
     by_date = {}
     for st in showtimes:
         by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st)
@@ -214,8 +283,9 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
+            score_badge = _metascore_badge(metascores.get(movie))
             movie_rows.append(
-                f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
+                f'<div class="movie"><div class="movie-name">{html.escape(movie)}{score_badge}</div>'
                 f'<div class="times">{time_chips}</div></div>'
             )
         date_cards.append(
@@ -281,7 +351,11 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset()):
   .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); }}
   .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
   .movie:first-of-type {{ border-top: none; padding-top: 0; }}
-  .movie-name {{ font-weight: 600; margin-bottom: 6px; }}
+  .movie-name {{ font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }}
+  .score {{ font-size: 0.75rem; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 4px; }}
+  .score-good {{ background: #54a72a; }}
+  .score-mixed {{ background: #cc8a00; }}
+  .score-bad {{ background: #d3312a; }}
   .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
   .chip {{ font-size: 0.85rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
     display: inline-flex; align-items: center; gap: 5px; }}
@@ -377,8 +451,14 @@ def main():
     save_seen(seen)
     print(f"\n💾 Cache saved ({len(seen)} total)")
 
+    movie_titles = sorted({st['movie'] for st in showtimes})
+    metascores = update_metascores(movie_titles)
+    if OMDB_API_KEY:
+        scored = sum(1 for v in metascores.values() if v is not None)
+        print(f"🏆 Metascores: {scored}/{len(movie_titles)} movies")
+
     SITE_DIR.mkdir(exist_ok=True)
-    site_html = build_site_html(showtimes, datetime.now(), new_keys)
+    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores)
     (SITE_DIR / "index.html").write_text(site_html, encoding="utf-8")
     print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new) → {SITE_DIR / 'index.html'}")
 
