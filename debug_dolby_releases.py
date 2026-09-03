@@ -50,29 +50,10 @@ def main():
         dates = [datetime.strptime(e['date'], '%b %d, %Y') for e in entries]
         if dates:
             print(f"Range: {min(dates).date()} to {max(dates).date()}")
-        for e in entries:
-            print(json.dumps(e))
 
-        print("=== POTENTIAL REPEATING CARD STRUCTURE ===")
-        # Look for elements that repeat with similar class names, a common
-        # pattern for a list of release cards.
-        info = page.evaluate(r"""
-            () => {
-                const counts = {};
-                document.querySelectorAll('body *[class]').forEach(el => {
-                    el.className.split(/\s+/).forEach(c => {
-                        if (!c) return;
-                        counts[c] = (counts[c] || 0) + 1;
-                    });
-                });
-                return Object.entries(counts)
-                    .filter(([c, n]) => n >= 5 && n <= 200)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 40);
-            }
-        """)
-        for cls, n in info:
-            print(f"{n:4d}  {cls}")
+        print("=== FIRST 40 (most-future-first, as encountered) ===")
+        for e in entries[:40]:
+            print(json.dumps(e))
 
         browser.close()
 
