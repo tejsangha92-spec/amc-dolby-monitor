@@ -9,6 +9,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -314,11 +315,20 @@ def _format_time(t):
     return f"{hour12}:{minute:02d} {period}"
 
 
-def _metascore_badge(score):
+def _metacritic_search_url(movie):
+    title = re.sub(r'\s*\(\d{4}\)$', '', movie)
+    return f"https://www.metacritic.com/search/{quote(title)}/"
+
+
+def _metascore_badge(score, movie):
     if score is None:
         return ""
     cls = "score-good" if score >= 61 else ("score-mixed" if score >= 40 else "score-bad")
-    return f'<span class="score {cls}" title="Metascore">{score}</span>'
+    url = _metacritic_search_url(movie)
+    return (
+        f'<a class="score {cls}" title="View on Metacritic" href="{html.escape(url)}" '
+        f'target="_blank" rel="noopener">{score}</a>'
+    )
 
 
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None, upcoming_releases=None):
@@ -342,7 +352,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
-            score_badge = _metascore_badge(metascores.get(movie))
+            score_badge = _metascore_badge(metascores.get(movie), movie)
             movie_rows.append(
                 f'<div class="movie"><div class="movie-name">{html.escape(movie)}{score_badge}</div>'
                 f'<div class="times">{time_chips}</div></div>'
@@ -378,7 +388,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     if now_playing_titles:
         rows = "".join(
             f'<div class="now-row"><span class="now-title">{html.escape(t)}</span>'
-            f'{_metascore_badge(metascores.get(t))}</div>'
+            f'{_metascore_badge(metascores.get(t), t)}</div>'
             for t in now_playing_titles
         )
         now_playing_section = (
@@ -450,7 +460,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
   .movie:first-of-type {{ border-top: none; padding-top: 0; }}
   .movie-name {{ font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }}
-  .score {{ font-size: 0.75rem; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 4px; }}
+  .score {{ font-size: 0.75rem; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 4px; text-decoration: none; cursor: pointer; }}
+  .score:hover {{ filter: brightness(1.12); text-decoration: underline; }}
   .score-good {{ background: #54a72a; }}
   .score-mixed {{ background: #cc8a00; }}
   .score-bad {{ background: #d3312a; }}
