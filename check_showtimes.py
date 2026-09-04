@@ -127,7 +127,7 @@ def get_dolby_showtimes():
         )
         page = context.new_page()
         
-        for day_offset in range(60):  # Check 2 months
+        for day_offset in range(90):  # Check 3 months
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
