@@ -20,7 +20,8 @@ SITE_DIR = Path("docs")
 
 OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
 METASCORE_FILE = Path("metascore_cache.json")
-METASCORE_REFRESH_DAYS = 7  # re-check unscored/stale movies this often
+METASCORE_REFRESH_DAYS = 7  # re-check movies we already have a score for this often
+METASCORE_RECHECK_DAYS_UNSCORED = 1  # movies with no score yet: retry daily (new reviews land, cache misses get fixed)
 
 THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
@@ -72,23 +73,45 @@ def save_metascores(cache):
         json.dump(cache, f, indent=2)
 
 
+_RERELEASE_SUFFIX_RE = re.compile(
+    r':\s*(\d+(st|nd|rd|th)\s+anniversary|anniversary\s+edition|'
+    r"director'?s\s+cut|remaster(ed)?|special\s+edition|extended\s+edition|"
+    r're-?release|reissue)\b.*$',
+    re.IGNORECASE,
+)
+
+
 def fetch_metascore(movie):
-    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown."""
+    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
+
+    Tries the exact title/year first. If that comes up empty, loosens the
+    year (Fandango's listed year sometimes differs from OMDb's, e.g. for
+    festival titles) and strips known re-release/edition suffixes (e.g.
+    "Cars: 20th Anniversary" -> "Cars", since it's the same film and shares
+    its review score) before giving up.
+    """
     match = re.match(r'^(.+?)\s*\((\d{4})\)$', movie)
     title, year = (match.group(1), match.group(2)) if match else (movie, None)
 
-    params = {"t": title, "apikey": OMDB_API_KEY}
-    if year:
-        params["y"] = year
+    titles_to_try = [title]
+    stripped = _RERELEASE_SUFFIX_RE.sub('', title).strip()
+    if stripped and stripped != title:
+        titles_to_try.append(stripped)
 
-    try:
-        resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
-        data = resp.json()
-        score = data.get("Metascore")
-        if score and score.isdigit():
-            return int(score)
-    except Exception as e:
-        print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
+    for t in titles_to_try:
+        for y in ([year, None] if year else [None]):
+            params = {"t": t, "apikey": OMDB_API_KEY}
+            if y:
+                params["y"] = y
+            try:
+                resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
+                data = resp.json()
+            except Exception as e:
+                print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
+                continue
+            score = data.get("Metascore")
+            if score and score.isdigit():
+                return int(score)
 
     return None
 
@@ -101,11 +124,16 @@ def update_metascores(movie_titles):
 
     cache = load_metascores()
     today = datetime.now().strftime("%Y-%m-%d")
-    stale_cutoff = (datetime.now() - timedelta(days=METASCORE_REFRESH_DAYS)).strftime("%Y-%m-%d")
+    scored_cutoff = (datetime.now() - timedelta(days=METASCORE_REFRESH_DAYS)).strftime("%Y-%m-%d")
+    unscored_cutoff = (datetime.now() - timedelta(days=METASCORE_RECHECK_DAYS_UNSCORED)).strftime("%Y-%m-%d")
 
     for movie in movie_titles:
         entry = cache.get(movie)
-        needs_fetch = entry is None or entry.get("checked", "") < stale_cutoff
+        if entry is None:
+            needs_fetch = True
+        else:
+            cutoff = unscored_cutoff if entry.get("score") is None else scored_cutoff
+            needs_fetch = entry.get("checked", "") < cutoff
         if needs_fetch:
             score = fetch_metascore(movie)
             cache[movie] = {"score": score, "checked": today}
