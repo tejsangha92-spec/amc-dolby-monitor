@@ -81,14 +81,16 @@ _RERELEASE_SUFFIX_RE = re.compile(
 )
 
 
-def fetch_metascore(movie):
-    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
+def fetch_ratings(movie):
+    """Look up Metacritic and Rotten Tomatoes scores for a movie via OMDb
+    (both come back in the same response). Returns (metascore, rt_score),
+    either of which may be None if unknown.
 
     Tries the exact title/year first. If that comes up empty, loosens the
     year (Fandango's listed year sometimes differs from OMDb's, e.g. for
     festival titles) and strips known re-release/edition suffixes (e.g.
     "Cars: 20th Anniversary" -> "Cars", since it's the same film and shares
-    its review score) before giving up.
+    its review scores) before giving up.
     """
     match = re.match(r'^(.+?)\s*\((\d{4})\)$', movie)
     title, year = (match.group(1), match.group(2)) if match else (movie, None)
@@ -107,18 +109,30 @@ def fetch_metascore(movie):
                 resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
                 data = resp.json()
             except Exception as e:
-                print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
+                print(f"  ⚠️  Ratings lookup failed for {movie}: {e}")
                 continue
-            score = data.get("Metascore")
-            if score and score.isdigit():
-                return int(score)
 
-    return None
+            metascore = data.get("Metascore")
+            metascore = int(metascore) if metascore and metascore.isdigit() else None
+
+            rt_score = None
+            for rating in data.get("Ratings", []):
+                if rating.get("Source") == "Rotten Tomatoes":
+                    rt_match = re.match(r'(\d+)%', rating.get("Value", ""))
+                    if rt_match:
+                        rt_score = int(rt_match.group(1))
+                    break
+
+            if metascore is not None or rt_score is not None:
+                return metascore, rt_score
+
+    return None, None
 
 
 def update_metascores(movie_titles):
-    """Fetch/refresh Metascores for the given movies, using a local cache to
-    avoid re-querying OMDb every run. Returns {movie: score_or_None}."""
+    """Fetch/refresh Metacritic + Rotten Tomatoes ratings for the given
+    movies, using a local cache to avoid re-querying OMDb every run.
+    Returns {movie: {"score": metascore_or_None, "rt": rt_or_None}}."""
     if not OMDB_API_KEY:
         return {}
 
@@ -132,14 +146,15 @@ def update_metascores(movie_titles):
         if entry is None:
             needs_fetch = True
         else:
-            cutoff = unscored_cutoff if entry.get("score") is None else scored_cutoff
+            has_rating = entry.get("score") is not None or entry.get("rt") is not None
+            cutoff = scored_cutoff if has_rating else unscored_cutoff
             needs_fetch = entry.get("checked", "") < cutoff
         if needs_fetch:
-            score = fetch_metascore(movie)
-            cache[movie] = {"score": score, "checked": today}
+            metascore, rt_score = fetch_ratings(movie)
+            cache[movie] = {"score": metascore, "rt": rt_score, "checked": today}
 
     save_metascores(cache)
-    return {movie: cache[movie]["score"] for movie in movie_titles if movie in cache}
+    return {movie: cache[movie] for movie in movie_titles if movie in cache}
 
 
 def get_dolby_showtimes():
@@ -392,6 +407,11 @@ def _metacritic_search_url(movie):
     return f"https://www.metacritic.com/search/{quote(title)}/"
 
 
+def _rotten_tomatoes_search_url(movie):
+    title = re.sub(r'\s*\(\d{4}\)$', '', movie)
+    return f"https://www.rottentomatoes.com/search?search={quote(title)}"
+
+
 def _metascore_badge(score, movie):
     if score is None:
         return ""
@@ -401,6 +421,25 @@ def _metascore_badge(score, movie):
         f'<a class="score {cls}" title="View on Metacritic" href="{html.escape(url)}" '
         f'target="_blank" rel="noopener">{score}</a>'
     )
+
+
+def _rt_badge(rt_score, movie):
+    if rt_score is None:
+        return ""
+    fresh = rt_score >= 60
+    cls = "score-good" if fresh else "score-bad"
+    icon = "🍅" if fresh else "🤢"
+    url = _rotten_tomatoes_search_url(movie)
+    return (
+        f'<a class="score {cls}" title="View on Rotten Tomatoes" href="{html.escape(url)}" '
+        f'target="_blank" rel="noopener">{icon} {rt_score}%</a>'
+    )
+
+
+def _rating_badges(entry, movie):
+    entry = entry or {}
+    badges = _metascore_badge(entry.get("score"), movie) + _rt_badge(entry.get("rt"), movie)
+    return f'<span class="ratings">{badges}</span>' if badges else ""
 
 
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
@@ -425,7 +464,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
-            score_badge = _metascore_badge(metascores.get(movie), movie)
+            score_badge = _rating_badges(metascores.get(movie), movie)
             movie_rows.append(
                 f'<div class="movie"><div class="movie-name">{html.escape(movie)}{score_badge}</div>'
                 f'<div class="times">{time_chips}</div></div>'
@@ -462,7 +501,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     if now_playing_titles:
         rows = "".join(
             f'<div class="now-row"><span class="now-title">{html.escape(t)}</span>'
-            f'{_metascore_badge(metascores.get(t), t)}</div>'
+            f'{_rating_badges(metascores.get(t), t)}</div>'
             for t in now_playing_titles
         )
         now_playing_section = (
@@ -539,6 +578,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .score-good {{ background: #54a72a; }}
   .score-mixed {{ background: #cc8a00; }}
   .score-bad {{ background: #d3312a; }}
+  .ratings {{ display: inline-flex; align-items: center; gap: 6px; }}
   .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
   .chip {{ font-size: 0.85rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
     display: inline-flex; align-items: center; gap: 5px; }}
@@ -662,8 +702,9 @@ def main():
     movie_titles = sorted(set(st['movie'] for st in showtimes) | set(now_playing_titles))
     metascores = update_metascores(movie_titles)
     if OMDB_API_KEY:
-        scored = sum(1 for v in metascores.values() if v is not None)
-        print(f"🏆 Metascores: {scored}/{len(movie_titles)} movies")
+        scored = sum(1 for v in metascores.values() if v.get("score") is not None)
+        rt_scored = sum(1 for v in metascores.values() if v.get("rt") is not None)
+        print(f"🏆 Metascores: {scored}/{len(movie_titles)} movies, RT: {rt_scored}/{len(movie_titles)} movies")
 
     print(f"\n🎬 Checking upcoming Dolby Cinema releases...")
     upcoming_releases = get_upcoming_dolby_releases()

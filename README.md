@@ -67,7 +67,7 @@ In your GitHub repo:
    - Name: `IFTTT_WEBHOOK_KEY`
    - Value: Your webhook key from step 3
 
-   **Want Metacritic scores on the website?** (optional) Get a free API key at
+   **Want Metacritic and Rotten Tomatoes scores on the website?** (optional) Get a free API key at
    https://www.omdbapi.com/apikey.aspx (check your email to activate it), then add another
    secret:
    - Name: `OMDB_API_KEY`
