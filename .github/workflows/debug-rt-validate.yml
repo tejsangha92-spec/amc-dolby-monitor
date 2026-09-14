@@ -1,0 +1,25 @@
+name: Validate RT scraping (throwaway)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright requests
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run validation script
+        run: python debug_rt_validate.py
