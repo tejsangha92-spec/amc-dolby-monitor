@@ -9,6 +9,10 @@ on:
         description: 'Send a test push notification instead of checking showtimes'
         type: boolean
         default: false
+      force_ratings_refresh:
+        description: 'Force re-fetching Metacritic/Rotten Tomatoes ratings for every movie, ignoring the cache (use after a ratings-lookup code change)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -53,6 +57,7 @@ jobs:
         env:
           IFTTT_WEBHOOK_KEY: ${{ secrets.IFTTT_WEBHOOK_KEY }}
           OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+          FORCE_RATINGS_REFRESH: ${{ github.event.inputs.force_ratings_refresh }}
         run: python check_showtimes.py
 
       - name: Publish updated website

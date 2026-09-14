@@ -233,11 +233,12 @@ def update_metascores(movie_titles):
     today = datetime.now().strftime("%Y-%m-%d")
     scored_cutoff = (datetime.now() - timedelta(days=METASCORE_REFRESH_DAYS)).strftime("%Y-%m-%d")
     unscored_cutoff = (datetime.now() - timedelta(days=METASCORE_RECHECK_DAYS_UNSCORED)).strftime("%Y-%m-%d")
+    force_refresh = os.environ.get("FORCE_RATINGS_REFRESH", "").lower() == "true"
 
     needs_fetch = []
     for movie in movie_titles:
         entry = cache.get(movie)
-        if entry is None:
+        if entry is None or force_refresh:
             needs_fetch.append(movie)
             continue
         has_rating = entry.get("score") is not None or entry.get("rt") is not None
