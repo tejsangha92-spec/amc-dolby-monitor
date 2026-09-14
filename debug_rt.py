@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Throwaway diagnostic: inspect Rotten Tomatoes' search + movie page structure."""
+"""Throwaway diagnostic: find the real per-movie Tomatometer selector on Rotten Tomatoes."""
 
 import json
 
 from playwright.sync_api import sync_playwright
 
-SEARCH_TITLES = ["Dune Part Two", "The Odyssey", "Spider-Man Brand New Day", "PAW Patrol"]
+URL = "https://www.rottentomatoes.com/m/dune_part_two"
 
 
 def main():
@@ -16,97 +16,79 @@ def main():
             user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
         page = context.new_page()
+        page.goto(URL, timeout=30000, wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+        print("Final URL:", page.url)
+        print("Page title:", page.title())
+        print()
 
-        print("########## PHASE 1: SEARCH PAGE ##########\n")
-        movie_links_by_title = {}
-        for title in SEARCH_TITLES:
-            url = f"https://www.rottentomatoes.com/search?search={title.replace(' ', '%20')}"
-            print(f"=== {title} -> {url} ===")
-            try:
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
-                print("Final URL:", page.url)
-                print("Page title:", page.title())
+        # 1. All distinct custom element tag names on the page.
+        custom_tags = page.evaluate("""
+            () => {
+                const tags = new Set();
+                document.querySelectorAll('*').forEach(el => {
+                    if (el.tagName.includes('-')) tags.add(el.tagName.toLowerCase());
+                });
+                return Array.from(tags).sort();
+            }
+        """)
+        print(f"Custom element tags ({len(custom_tags)}):")
+        print(json.dumps(custom_tags))
+        print()
 
-                links = page.evaluate(r"""
-                    () => {
-                        const prefix = 'https://www.rottentomatoes.com/m/';
-                        const anchors = Array.from(document.querySelectorAll('a[href*="/m/"]'));
-                        const seen = new Set();
-                        const out = [];
-                        for (const a of anchors) {
-                            if (a.href.length <= prefix.length) continue;
-                            if (seen.has(a.href)) continue;
-                            seen.add(a.href);
-                            out.push({href: a.href, text: a.textContent.trim().slice(0, 80)});
-                        }
-                        return out;
+        # 2. All distinct data-qa attribute values (RT's common test-hook convention).
+        data_qa_values = page.evaluate("""
+            () => {
+                const vals = new Set();
+                document.querySelectorAll('[data-qa]').forEach(el => vals.add(el.getAttribute('data-qa')));
+                return Array.from(vals).sort();
+            }
+        """)
+        print(f"data-qa values ({len(data_qa_values)}):")
+        print(json.dumps(data_qa_values))
+        print()
+
+        # 3. Ancestor chain for each rt-text node (first 15), to see which are
+        # near the hero/title area vs a carousel/widget.
+        ancestor_info = page.evaluate("""
+            () => {
+                const out = [];
+                const nodes = Array.from(document.querySelectorAll('rt-text')).slice(0, 15);
+                for (const node of nodes) {
+                    const chain = [];
+                    let el = node;
+                    for (let i = 0; i < 5 && el; i++) {
+                        const attrs = [...el.attributes].map(a => `${a.name}="${a.value}"`).join(' ');
+                        chain.push(`<${el.tagName.toLowerCase()} ${attrs}>`.slice(0, 150));
+                        el = el.parentElement;
                     }
-                """)
-                print(f"Found {len(links)} movie links:")
-                for l in links[:10]:
-                    print(json.dumps(l))
-                if links:
-                    movie_links_by_title[title] = links[0]['href']
-            except Exception as e:
-                print("ERROR:", e)
+                    out.push({text: node.textContent.trim(), chain});
+                }
+                return out;
+            }
+        """)
+        print(f"rt-text ancestor chains ({len(ancestor_info)}):")
+        for info in ancestor_info:
+            print(f"  text={info['text']!r}")
+            for c in info['chain']:
+                print(f"    {c}")
             print()
 
-        print("\n########## PHASE 2: MOVIE PAGE SCORE EXTRACTION ##########\n")
-        # Include a couple of known-good direct URLs in case search didn't find anything usable.
-        test_urls = list(movie_links_by_title.values()) or []
-        test_urls.append("https://www.rottentomatoes.com/m/dune_part_two")
-
-        for url in dict.fromkeys(test_urls):
-            print(f"=== {url} ===")
-            try:
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                print("Final URL:", page.url)
-                print("Page title:", page.title())
-
-                # JSON-LD blocks that might carry aggregateRating
-                ld_blocks = page.evaluate("""
-                    () => Array.from(document.querySelectorAll('script[type="application/ld+json"]')).map(s => s.textContent)
-                """)
-                for block in ld_blocks:
-                    if 'ating' in block:
-                        print("JSON-LD (truncated 500):", block[:500])
-
-                # RT's web components (rt-text slots, score-icon elements)
-                els = page.evaluate("""
-                    () => {
-                        const out = [];
-                        document.querySelectorAll('rt-text').forEach(el => {
-                            out.push({tag: 'rt-text', slot: el.getAttribute('slot'), text: el.textContent.trim()});
-                        });
-                        document.querySelectorAll('score-icon-critics, score-icon-audience, media-scorecard, rt-button').forEach(el => {
-                            out.push({tag: el.tagName, attrs: [...el.attributes].map(a => `${a.name}=${a.value}`).join(' ')});
-                        });
-                        return out;
-                    }
-                """)
-                print(f"Found {len(els)} score-related elements:")
-                for el in els[:20]:
-                    print(json.dumps(el))
-
-                page.wait_for_timeout(2000)
-                # Re-check after a short wait in case of hydration delay
-                els_after_wait = page.evaluate("""
-                    () => {
-                        const out = [];
-                        document.querySelectorAll('rt-text').forEach(el => {
-                            out.push({tag: 'rt-text', slot: el.getAttribute('slot'), text: el.textContent.trim()});
-                        });
-                        return out;
-                    }
-                """)
-                print(f"rt-text elements after 2s wait: {len(els_after_wait)}")
-                for el in els_after_wait[:20]:
-                    print(json.dumps(el))
-
-            except Exception as e:
-                print("ERROR:", e)
-            print()
+        # 4. Try schema.org JSON-LD aggregateRating specifically.
+        ld_ratings = page.evaluate("""
+            () => {
+                const out = [];
+                document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+                    try {
+                        const data = JSON.parse(s.textContent);
+                        if (data.aggregateRating) out.push(data.aggregateRating);
+                    } catch (e) {}
+                });
+                return out;
+            }
+        """)
+        print("JSON-LD aggregateRating blocks:")
+        print(json.dumps(ld_ratings, indent=2))
 
         browser.close()
 
