@@ -3,6 +3,7 @@
 AMC Dolby Showtime Monitor - Trusts Dolby filter, validates movie titles
 """
 
+import difflib
 import html
 import json
 import os
@@ -71,6 +72,16 @@ def load_metascores():
 def save_metascores(cache):
     with open(METASCORE_FILE, 'w') as f:
         json.dump(cache, f, indent=2)
+
+
+def _titles_roughly_match(a, b):
+    """True if two movie titles are close enough to be the same film, to
+    guard against attaching a scraped score to the wrong movie."""
+    norm_a = re.sub(r'[^a-z0-9]+', ' ', a.lower()).strip()
+    norm_b = re.sub(r'[^a-z0-9]+', ' ', b.lower()).strip()
+    if not norm_a or not norm_b:
+        return False
+    return difflib.SequenceMatcher(None, norm_a, norm_b).ratio() >= 0.6
 
 
 _RERELEASE_SUFFIX_RE = re.compile(
@@ -168,23 +179,43 @@ def scrape_rt_score(movie, page):
         page.goto(movie_url, timeout=30000, wait_until="domcontentloaded")
         page.wait_for_timeout(1500)
 
-        ratings = page.evaluate(r"""
+        ld_blocks = page.evaluate(r"""
             () => {
                 const out = [];
                 document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
                     try {
                         const data = JSON.parse(s.textContent);
-                        if (data.aggregateRating) out.push(data.aggregateRating);
+                        if (data.aggregateRating || data.name) {
+                            out.push({name: data.name, aggregateRating: data.aggregateRating});
+                        }
                     } catch (e) {}
                 });
                 return out;
             }
         """)
-        for r in ratings:
-            if r.get("name") == "Tomatometer":
-                val = r.get("ratingValue")
+
+        tomatometer = None
+        page_name = None
+        for block in ld_blocks:
+            if page_name is None and block.get("name"):
+                page_name = block["name"]
+            rating = block.get("aggregateRating")
+            if rating and rating.get("name") == "Tomatometer":
+                val = rating.get("ratingValue")
                 if val and str(val).isdigit():
-                    return int(val)
+                    tomatometer = int(val)
+
+        if tomatometer is None:
+            return None
+
+        # Guard against attaching the wrong movie's score: reject if the
+        # landed-on page's own title doesn't resemble what we searched for
+        # (e.g. a bad/no-result search falling through to an unrelated page).
+        if page_name and not _titles_roughly_match(title, page_name):
+            print(f"  ⚠️  RT title mismatch for {movie!r}: landed on {page_name!r}, skipping")
+            return None
+
+        return tomatometer
     except Exception as e:
         print(f"  ⚠️  RT lookup failed for {movie}: {e}")
 
