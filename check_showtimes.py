@@ -81,16 +81,17 @@ _RERELEASE_SUFFIX_RE = re.compile(
 )
 
 
-def fetch_ratings(movie):
-    """Look up Metacritic and Rotten Tomatoes scores for a movie via OMDb
-    (both come back in the same response). Returns (metascore, rt_score),
-    either of which may be None if unknown.
+def fetch_metascore_omdb(movie):
+    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
 
     Tries the exact title/year first. If that comes up empty, loosens the
     year (Fandango's listed year sometimes differs from OMDb's, e.g. for
     festival titles) and strips known re-release/edition suffixes (e.g.
     "Cars: 20th Anniversary" -> "Cars", since it's the same film and shares
-    its review scores) before giving up.
+    its review score) before giving up.
+
+    (OMDb dropped Rotten Tomatoes data in 2018, so RT scores are scraped
+    separately in scrape_rt_score().)
     """
     match = re.match(r'^(.+?)\s*\((\d{4})\)$', movie)
     title, year = (match.group(1), match.group(2)) if match else (movie, None)
@@ -109,29 +110,90 @@ def fetch_ratings(movie):
                 resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
                 data = resp.json()
             except Exception as e:
-                print(f"  ⚠️  Ratings lookup failed for {movie}: {e}")
+                print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
                 continue
+            score = data.get("Metascore")
+            if score and score.isdigit():
+                return int(score)
 
-            metascore = data.get("Metascore")
-            metascore = int(metascore) if metascore and metascore.isdigit() else None
+    return None
 
-            rt_score = None
-            for rating in data.get("Ratings", []):
-                if rating.get("Source") == "Rotten Tomatoes":
-                    rt_match = re.match(r'(\d+)%', rating.get("Value", ""))
-                    if rt_match:
-                        rt_score = int(rt_match.group(1))
-                    break
 
-            if metascore is not None or rt_score is not None:
-                return metascore, rt_score
+def scrape_rt_score(movie, page):
+    """Scrape a movie's Tomatometer score (0-100) from Rotten Tomatoes.
 
-    return None, None
+    OMDb no longer carries Rotten Tomatoes data, and RT has no public API,
+    so this drives a real page via the given Playwright `page` (the caller
+    owns the browser/context lifecycle so it can be reused across movies).
+
+    Searches RT, skips the "Certified Fresh Picks" tiles that appear first
+    on every search regardless of query (identified by
+    data-qa="cert-fresh-link", not the actual results), and prefers a
+    result whose URL contains the expected year. The chosen movie page's
+    Tomatometer score comes from its schema.org JSON-LD block
+    (AggregateRating/Tomatometer) rather than scanning on-page text/score
+    elements, which are contaminated by a "trending" carousel repeated
+    near-identically across many movie pages.
+    """
+    match = re.match(r'^(.+?)\s*\((\d{4})\)$', movie)
+    title, year = (match.group(1), match.group(2)) if match else (movie, None)
+
+    try:
+        search_url = _rotten_tomatoes_search_url(movie)
+        page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
+        page.wait_for_timeout(2500)
+
+        links = page.evaluate(r"""
+            () => {
+                const seen = new Set();
+                const out = [];
+                for (const a of document.querySelectorAll('a[href*="/m/"]')) {
+                    if (a.getAttribute('data-qa') === 'cert-fresh-link') continue;
+                    if (seen.has(a.href)) continue;
+                    seen.add(a.href);
+                    out.push(a.href);
+                }
+                return out;
+            }
+        """)
+        if not links:
+            return None
+
+        movie_url = links[0]
+        if year:
+            year_matches = [l for l in links if f"_{year}" in l]
+            if year_matches:
+                movie_url = year_matches[0]
+
+        page.goto(movie_url, timeout=30000, wait_until="domcontentloaded")
+        page.wait_for_timeout(1500)
+
+        ratings = page.evaluate(r"""
+            () => {
+                const out = [];
+                document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+                    try {
+                        const data = JSON.parse(s.textContent);
+                        if (data.aggregateRating) out.push(data.aggregateRating);
+                    } catch (e) {}
+                });
+                return out;
+            }
+        """)
+        for r in ratings:
+            if r.get("name") == "Tomatometer":
+                val = r.get("ratingValue")
+                if val and str(val).isdigit():
+                    return int(val)
+    except Exception as e:
+        print(f"  ⚠️  RT lookup failed for {movie}: {e}")
+
+    return None
 
 
 def update_metascores(movie_titles):
     """Fetch/refresh Metacritic + Rotten Tomatoes ratings for the given
-    movies, using a local cache to avoid re-querying OMDb every run.
+    movies, using a local cache to avoid re-querying every run.
     Returns {movie: {"score": metascore_or_None, "rt": rt_or_None}}."""
     if not OMDB_API_KEY:
         return {}
@@ -141,17 +203,32 @@ def update_metascores(movie_titles):
     scored_cutoff = (datetime.now() - timedelta(days=METASCORE_REFRESH_DAYS)).strftime("%Y-%m-%d")
     unscored_cutoff = (datetime.now() - timedelta(days=METASCORE_RECHECK_DAYS_UNSCORED)).strftime("%Y-%m-%d")
 
+    needs_fetch = []
     for movie in movie_titles:
         entry = cache.get(movie)
         if entry is None:
-            needs_fetch = True
-        else:
-            has_rating = entry.get("score") is not None or entry.get("rt") is not None
-            cutoff = scored_cutoff if has_rating else unscored_cutoff
-            needs_fetch = entry.get("checked", "") < cutoff
-        if needs_fetch:
-            metascore, rt_score = fetch_ratings(movie)
-            cache[movie] = {"score": metascore, "rt": rt_score, "checked": today}
+            needs_fetch.append(movie)
+            continue
+        has_rating = entry.get("score") is not None or entry.get("rt") is not None
+        cutoff = scored_cutoff if has_rating else unscored_cutoff
+        if entry.get("checked", "") < cutoff:
+            needs_fetch.append(movie)
+
+    if needs_fetch:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            page = context.new_page()
+            for movie in needs_fetch:
+                metascore = fetch_metascore_omdb(movie)
+                rt_score = scrape_rt_score(movie, page)
+                cache[movie] = {"score": metascore, "rt": rt_score, "checked": today}
+            browser.close()
 
     save_metascores(cache)
     return {movie: cache[movie] for movie in movie_titles if movie in cache}
