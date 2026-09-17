@@ -545,10 +545,6 @@ def _rt_badge(rt_score, movie):
     )
 
 
-def _rating_badges(entry, movie):
-    entry = entry or {}
-    badges = _metascore_badge(entry.get("score"), movie) + _rt_badge(entry.get("rt"), movie)
-    return f'<span class="ratings">{badges}</span>' if badges else ""
 
 
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
@@ -573,9 +569,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
-            score_badge = _rating_badges(metascores.get(movie), movie)
             movie_rows.append(
-                f'<div class="movie"><div class="movie-name">{html.escape(movie)}{score_badge}</div>'
+                f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
                 f'<div class="times">{time_chips}</div></div>'
             )
         date_cards.append(
@@ -608,14 +603,22 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         now_playing_titles = sorted({st['movie'] for st in showtimes if st['date'] == today_str})
     now_playing_section = ""
     if now_playing_titles:
-        rows = "".join(
-            f'<div class="now-row"><span class="now-title">{html.escape(t)}</span>'
-            f'{_rating_badges(metascores.get(t), t)}</div>'
-            for t in now_playing_titles
-        )
+        row_html = []
+        for t in now_playing_titles:
+            entry = metascores.get(t) or {}
+            mc_cell = _metascore_badge(entry.get("score"), t) or "—"
+            rt_cell = _rt_badge(entry.get("rt"), t) or "—"
+            row_html.append(
+                f'<tr><td class="now-title">{html.escape(t)}</td>'
+                f'<td class="now-score">{mc_cell}</td>'
+                f'<td class="now-score">{rt_cell}</td></tr>'
+            )
         now_playing_section = (
             f'<section class="now-playing"><h2>🎟️ Now in Theatres</h2>'
-            f'<div class="now-list">{rows}</div></section>'
+            f'<div class="now-table-wrap"><table class="now-table">'
+            f'<thead><tr><th>Movie</th><th>Metacritic</th><th>Rotten Tomatoes</th></tr></thead>'
+            f'<tbody>{"".join(row_html)}</tbody></table></div>'
+            f'</section>'
         )
 
     releases_section = ""
@@ -687,7 +690,6 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .score-good {{ background: #54a72a; }}
   .score-mixed {{ background: #cc8a00; }}
   .score-bad {{ background: #d3312a; }}
-  .ratings {{ display: inline-flex; align-items: center; gap: 6px; }}
   .times {{ display: flex; flex-wrap: wrap; gap: 6px; }}
   .chip {{ font-size: 0.85rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
     display: inline-flex; align-items: center; gap: 5px; }}
@@ -710,11 +712,16 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .new-when {{ color: var(--muted); white-space: nowrap; }}
   .now-playing {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
-  .now-playing h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
-  .now-row {{ display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 6px 0; border-top: 1px solid var(--border); font-size: 0.9rem; }}
-  .now-row:first-child {{ border-top: none; }}
+  .now-playing h2 {{ margin: 0 0 10px; font-size: 1.05rem; color: var(--accent); }}
+  .now-table-wrap {{ overflow-x: auto; }}
+  .now-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+  .now-table th {{ text-align: left; font-weight: 600; color: var(--muted); font-size: 0.68rem;
+    text-transform: uppercase; letter-spacing: 0.03em; padding: 0 6px 6px; white-space: nowrap; }}
+  .now-table th:not(:first-child), .now-table td:not(:first-child) {{ text-align: center; }}
+  .now-table td {{ padding: 7px 6px; border-top: 1px solid var(--border); }}
+  .now-table tbody tr:first-child td {{ border-top: none; }}
   .now-title {{ font-weight: 600; }}
+  .now-score {{ white-space: nowrap; color: var(--muted); }}
   .releases {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
   .releases h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
