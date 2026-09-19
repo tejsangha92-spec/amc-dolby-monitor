@@ -477,21 +477,23 @@ def get_upcoming_dolby_releases(days_ahead=90):
     return _parse_dolby_releases(text, today, cutoff)
 
 
-def send_notification(movie, time, date):
+def send_notification(movie, time, date, kind="new"):
+    value1 = movie if kind == "new" else f"🎟️ Tickets now on sale: {movie}"
+
     if not IFTTT_WEBHOOK_KEY:
-        print(f"  [DRY RUN] {movie} - {date} {time}")
+        print(f"  [DRY RUN] {value1} - {date} {time}")
         return
 
     url = f"https://maker.ifttt.com/trigger/{IFTTT_EVENT_NAME}/with/key/{IFTTT_WEBHOOK_KEY}"
     try:
         resp = requests.post(url, json={
-            "value1": movie,
+            "value1": value1,
             "value2": f"{date} at {time}",
             "value3": THEATER_NAME
         }, timeout=10)
 
         if resp.status_code == 200:
-            print(f"  ✅ Notified: {movie} - {time}")
+            print(f"  ✅ Notified: {value1} - {time}")
     except Exception as e:
         print(f"  ❌ Error: {e}")
 
@@ -548,7 +550,7 @@ def _rt_badge(rt_score, movie):
 
 
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
-                     upcoming_releases=None, now_playing_titles=None):
+                     upcoming_releases=None, now_playing_titles=None, went_on_sale_keys=frozenset()):
     metascores = metascores or {}
     upcoming_releases = upcoming_releases or []
     by_date = {}
@@ -556,9 +558,14 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         by_date.setdefault(st['date'], {}).setdefault(st['movie'], []).append(st)
 
     def chip(st):
-        is_new = f"{st['movie']}|{st['date']}|{st['time']}" in new_keys
+        key = f"{st['movie']}|{st['date']}|{st['time']}"
         avail_cls = "available" if st.get('available') else "restricted"
-        badge = '<span class="badge">NEW</span>' if is_new else ""
+        if key in new_keys:
+            badge = '<span class="badge">NEW</span>'
+        elif key in went_on_sale_keys:
+            badge = '<span class="badge badge-sale">ON SALE</span>'
+        else:
+            badge = ""
         return f'<span class="chip {avail_cls}">{badge}{_format_time(st["time"])}</span>'
 
     date_cards = []
@@ -596,6 +603,22 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         )
         banner = (
             f'<section class="banner"><h2>🆕 Just added ({len(new_items)})</h2>{rows}</section>'
+        )
+
+    sale_items = sorted(
+        (st for st in showtimes if f"{st['movie']}|{st['date']}|{st['time']}" in went_on_sale_keys),
+        key=lambda st: (st['date'], _time_sort_key(st['time']))
+    )
+    sale_banner = ""
+    if sale_items:
+        rows = "".join(
+            f'<div class="new-row"><span class="new-movie">{html.escape(st["movie"])}</span>'
+            f'<span class="new-when">{datetime.strptime(st["date"], "%Y-%m-%d").strftime("%a %b %-d")} '
+            f'· {_format_time(st["time"])}</span></div>'
+            for st in sale_items
+        )
+        sale_banner = (
+            f'<section class="banner sale-banner"><h2>🎟️ Just went on sale ({len(sale_items)})</h2>{rows}</section>'
         )
 
     if now_playing_titles is None:
@@ -651,6 +674,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
     --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
     --new-bg: #dcfce7; --new-text: #15803d; --new-card: #f0fdf4; --new-border: #bbf7d0;
+    --sale-text: #b45309; --sale-card: #fffaf0; --sale-border: #fde3b8;
     --avail-bg: #e36600; --avail-text: #ffffff;
     --restricted-bg: #e5e7eb; --restricted-text: #6b7280;
     --badge-bg: rgba(255, 255, 255, 0.92); --badge-text: #111827;
@@ -659,6 +683,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     :root {{ --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
       --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31;
       --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26;
+      --sale-text: #fbbf24; --sale-card: #2a1d0f; --sale-border: #4a2c0a;
       --avail-bg: #f2790a; --avail-text: #17110a;
       --restricted-bg: #2c2c31; --restricted-text: #8a8a90;
       --badge-bg: rgba(0, 0, 0, 0.55); --badge-text: #ffffff; }}
@@ -698,6 +723,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     font-weight: 500; opacity: 0.85; }}
   .badge {{ background: var(--badge-bg); color: var(--badge-text); font-size: 0.65rem;
     font-weight: 700; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 999px; }}
+  .badge-sale {{ background: var(--avail-bg); color: var(--avail-text); }}
   .legend {{ display: flex; gap: 14px; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }}
   .legend span {{ display: inline-flex; align-items: center; gap: 5px; }}
   .legend i {{ width: 9px; height: 9px; border-radius: 999px; display: inline-block; }}
@@ -706,6 +732,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .banner {{ background: var(--new-card); border: 1px solid var(--new-border); border-radius: 12px;
     padding: 18px 20px; }}
   .banner h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--new-text); }}
+  .sale-banner {{ background: var(--sale-card); border-color: var(--sale-border); }}
+  .sale-banner h2 {{ color: var(--sale-text); }}
   .new-row {{ display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
     font-size: 0.9rem; }}
   .new-movie {{ font-weight: 600; }}
@@ -744,6 +772,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
 <main>
 <div class="primary">
 {banner}
+{sale_banner}
 {body}
 </div>
 <aside class="sidebar">
@@ -791,14 +820,32 @@ def main():
     
     new_count = 0
     new_keys = set()
+    went_on_sale_keys = set()
     for st in showtimes:
         key = f"{st['movie']}|{st['date']}|{st['time']}"
+        is_available = bool(st.get('available'))
         if key not in seen:
             new_count += 1
             new_keys.add(key)
             print(f"🎬 NEW: {st['movie']} - {st['date']} {st['time']}")
             send_notification(st['movie'], st['time'], st['date'])
-            seen[key] = {"date": st['date'], "added": datetime.now().isoformat()}
+            seen[key] = {"date": st['date'], "added": datetime.now().isoformat(), "available": is_available}
+        else:
+            entry = seen[key]
+            # Entries from before availability tracking existed have no
+            # "available" field yet; backfill it this run without treating
+            # it as a flip (avoids a burst of false "on sale" notifications
+            # for showtimes that were already available).
+            had_tracked_availability = "available" in entry
+            was_available = entry.get("available", False)
+            if had_tracked_availability and is_available and not was_available:
+                went_on_sale_keys.add(key)
+                print(f"🎟️  ON SALE: {st['movie']} - {st['date']} {st['time']}")
+                send_notification(st['movie'], st['time'], st['date'], kind="available")
+            entry["available"] = is_available
+
+    if went_on_sale_keys:
+        print(f"\n🎟️  {len(went_on_sale_keys)} showtime(s) just went on sale!")
 
     if new_count == 0:
         if len(showtimes) == 0:
@@ -827,9 +874,11 @@ def main():
     print(f"📅 {len(upcoming_releases)} releases in the next 3 months")
 
     SITE_DIR.mkdir(exist_ok=True)
-    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores, upcoming_releases, now_playing_titles)
+    site_html = build_site_html(showtimes, datetime.now(), new_keys, metascores, upcoming_releases,
+                                 now_playing_titles, went_on_sale_keys)
     (SITE_DIR / "index.html").write_text(site_html, encoding="utf-8")
-    print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new) → {SITE_DIR / 'index.html'}")
+    print(f"🌐 Website updated ({len(showtimes)} showtimes, {len(new_keys)} new, "
+          f"{len(went_on_sale_keys)} on sale) → {SITE_DIR / 'index.html'}")
 
 
 if __name__ == "__main__":
