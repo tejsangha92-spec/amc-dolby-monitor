@@ -77,7 +77,7 @@ In your GitHub repo:
 
 3. Click **"Variables"** tab → **"New repository variable"**:
    - Name: `THEATER_SLUG`
-   - Value: `amc-dine-in-thousand-oaks-14` (or your theater—see below)
+   - Value: `amc-thousand-oaks-14` (or your theater—see below)
 
 ### 5. Enable GitHub Actions
 
@@ -99,7 +99,7 @@ You should receive a notification within a minute if there are any Dolby showtim
 Examples:
 | Theater | URL | Slug |
 |---------|-----|------|
-| AMC Thousand Oaks 14 | `.../amc-dine-in-thousand-oaks-14` | `amc-dine-in-thousand-oaks-14` |
+| AMC Thousand Oaks 14 | `.../amc-thousand-oaks-14` | `amc-thousand-oaks-14` |
 | AMC Century City 15 | `.../amc-century-city-15` | `amc-century-city-15` |
 | AMC Burbank 16 | `.../amc-burbank-16` | `amc-burbank-16` |
 
