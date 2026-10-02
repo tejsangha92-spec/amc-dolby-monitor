@@ -24,33 +24,35 @@ METASCORE_FILE = Path("metascore_cache.json")
 METASCORE_REFRESH_DAYS = 7  # re-check movies we already have a score for this often
 METASCORE_RECHECK_DAYS_UNSCORED = 1  # movies with no score yet: retry daily (new reviews land, cache misses get fixed)
 
-THEATER_NAME = "AMC DINE-IN Thousand Oaks 14"
+THEATER_NAME = "AMC Thousand Oaks 14"
 FANDANGO_THEATER_ID = "aavib"
 AMC_THEATER_URL = "https://www.amctheatres.com/movie-theatres/los-angeles/amc-thousand-oaks-14/showtimes"
 DOLBY_RELEASES_URL = "https://professional.dolby.com/cinema/theatrical-releases/"
 
 
 def is_valid_movie_title(title):
-    """Check if this looks like a real movie title, not page navigation text."""
-    # Must have year in parens
-    if not re.search(r'\(\d{4}\)$', title):
-        return False
-    
+    """Check if this looks like a real movie title, not page navigation text.
+
+    Does not require a trailing "(YYYY)" — Fandango omits the year for
+    unambiguous classic re-releases (e.g. "Training Day" screening on its
+    Dolby Cinema re-release date), and the movie-title-specific selector
+    this is applied to is unlikely to sweep up real navigation junk anyway.
+    """
     # Filter out obvious non-movies
     invalid_patterns = [
-        'calendar', 'selected', 'previous', 'next', 
+        'calendar', 'selected', 'previous', 'next',
         'skip to', 'go to', 'today', 'tomorrow',
         'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
         'january', 'february', 'march', 'april', 'may', 'june',
         'july', 'august', 'september', 'october', 'november', 'december',
         'offers', 'gift card', 'sign in', 'join', 'theater info',
     ]
-    
+
     title_lower = title.lower()
     for pattern in invalid_patterns:
         if pattern in title_lower:
             return False
-    
+
     # Must be reasonable length
     name_part = re.sub(r'\s*\(\d{4}\)$', '', title)
     if len(name_part) < 2 or len(name_part) > 100:
@@ -283,7 +285,7 @@ def get_dolby_showtimes():
             date = datetime.now() + timedelta(days=day_offset)
             date_str = date.strftime("%Y-%m-%d")
             
-            url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
+            url = f"https://www.fandango.com/amc-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
             
             print(f"  Checking {date_str}...", end="")
             
@@ -382,7 +384,7 @@ def get_all_theater_movies():
     from playwright.sync_api import sync_playwright
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
+    url = f"https://www.fandango.com/amc-thousand-oaks-14-{FANDANGO_THEATER_ID}/theater-page?date={date_str}"
 
     titles = []
     with sync_playwright() as p:
