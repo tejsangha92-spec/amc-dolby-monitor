@@ -1,50 +1,12 @@
 #!/usr/bin/env python3
-"""Throwaway diagnostic: compare our hardcoded (old) slug
-'amc-dine-in-thousand-oaks-14-aavib' against the current real slug
-'amc-thousand-oaks-14-aavib' for today's date, with the Dolby Cinema
-filter applied, to see if the stale slug is silently dropping showtimes."""
+"""Throwaway diagnostic: check Fandango's Dolby-filtered listing for AMC
+Thousand Oaks 14 around Oct 14, 2026 (Training Day's official Dolby
+release date per our own releases scrape), dumping RAW titles (before
+is_valid_movie_title filtering) to see the exact string format."""
 
-from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-date_str = datetime.now().strftime("%Y-%m-%d")
-URLS = {
-    "OLD (our hardcoded slug)": f"https://www.fandango.com/amc-dine-in-thousand-oaks-14-aavib/theater-page?date={date_str}",
-    "NEW (current real slug)": f"https://www.fandango.com/amc-thousand-oaks-14-aavib/theater-page?date={date_str}",
-}
-
-
-def scrape(page, url):
-    page.goto(url, timeout=30000, wait_until="domcontentloaded")
-    page.wait_for_timeout(3000)
-    final_url = page.url
-
-    dolby_clicked = False
-    for selector in ['text="Dolby Cinema"', 'text="DOLBY CINEMA"']:
-        try:
-            tab = page.locator(selector).first
-            if tab.is_visible(timeout=1000):
-                tab.click()
-                page.wait_for_timeout(2000)
-                dolby_clicked = True
-                break
-        except Exception:
-            continue
-
-    raw = page.evaluate(r"""
-        () => {
-            const out = [];
-            for (const movieEl of document.querySelectorAll('li.shared-movie-showtimes')) {
-                const titleEl = movieEl.querySelector('.shared-movie-showtimes__movie-title-link');
-                if (!titleEl) continue;
-                const title = titleEl.textContent.trim();
-                const btnTexts = Array.from(movieEl.querySelectorAll('.showtime-btn')).map(b => b.textContent.trim());
-                out.push({title, btnTexts});
-            }
-            return out;
-        }
-    """)
-    return final_url, dolby_clicked, raw
+DATES = ["2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"]
 
 
 def main():
@@ -56,15 +18,42 @@ def main():
         )
         page = context.new_page()
 
-        for label, url in URLS.items():
-            print(f"=== {label}: {url} ===")
+        for date_str in DATES:
+            url = f"https://www.fandango.com/amc-thousand-oaks-14-aavib/theater-page?date={date_str}"
+            print(f"=== {date_str}: {url} ===")
             try:
-                final_url, dolby_clicked, raw = scrape(page, url)
-                print(f"Final URL after load: {final_url}")
+                page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                page.wait_for_timeout(3000)
+
+                dolby_clicked = False
+                for selector in ['text="Dolby Cinema"', 'text="DOLBY CINEMA"']:
+                    try:
+                        tab = page.locator(selector).first
+                        if tab.is_visible(timeout=1000):
+                            tab.click()
+                            page.wait_for_timeout(2000)
+                            dolby_clicked = True
+                            break
+                    except Exception:
+                        continue
                 print(f"Dolby filter clicked: {dolby_clicked}")
+
+                raw = page.evaluate(r"""
+                    () => {
+                        const out = [];
+                        for (const movieEl of document.querySelectorAll('li.shared-movie-showtimes')) {
+                            const titleEl = movieEl.querySelector('.shared-movie-showtimes__movie-title-link');
+                            if (!titleEl) continue;
+                            const title = titleEl.textContent.trim();
+                            const btnTexts = Array.from(movieEl.querySelectorAll('.showtime-btn')).map(b => b.textContent.trim());
+                            out.push({title, btnTexts});
+                        }
+                        return out;
+                    }
+                """)
                 print(f"Movies found: {len(raw)}")
                 for item in raw:
-                    print(f"  {item['title']!r} -> {item['btnTexts']}")
+                    print(f"  title={item['title']!r} times={item['btnTexts']}")
             except Exception as e:
                 print("ERROR:", e)
             print()
