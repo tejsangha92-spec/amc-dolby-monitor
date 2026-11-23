@@ -95,8 +95,7 @@ _RERELEASE_SUFFIX_RE = re.compile(
 
 
 def fetch_metascore_omdb(movie):
-    """Look up a Metacritic score (0-100) and poster URL for a movie via
-    OMDb. Returns (metascore_or_None, poster_url_or_None).
+    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
 
     Tries the exact title/year first. If that comes up empty, loosens the
     year (Fandango's listed year sometimes differs from OMDb's, e.g. for
@@ -127,13 +126,10 @@ def fetch_metascore_omdb(movie):
                 print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
                 continue
             score = data.get("Metascore")
-            score = int(score) if score and score.isdigit() else None
-            poster = data.get("Poster")
-            poster = poster if poster and poster.startswith("http") else None
-            if score is not None or poster is not None:
-                return score, poster
+            if score and score.isdigit():
+                return int(score)
 
-    return None, None
+    return None
 
 
 def scrape_rt_score(movie, page):
@@ -263,9 +259,9 @@ def update_metascores(movie_titles):
             )
             page = context.new_page()
             for movie in needs_fetch:
-                metascore, poster = fetch_metascore_omdb(movie)
+                metascore = fetch_metascore_omdb(movie)
                 rt_score = scrape_rt_score(movie, page)
-                cache[movie] = {"score": metascore, "rt": rt_score, "poster": poster, "checked": today}
+                cache[movie] = {"score": metascore, "rt": rt_score, "checked": today}
             browser.close()
 
     save_metascores(cache)
@@ -553,19 +549,6 @@ def _rt_badge(rt_score, movie):
     )
 
 
-def _poster_img(poster_url, movie, cls="poster"):
-    """Poster thumbnail <img>, or "" if no poster is known. Removes itself
-    on load failure (e.g. a dead OMDb-hosted image URL) rather than
-    showing a broken-image icon."""
-    if not poster_url:
-        return ""
-    alt = html.escape(movie)
-    src = html.escape(poster_url)
-    return f'<img class="{cls}" src="{src}" alt="{alt}" loading="lazy" onerror="this.remove()">'
-
-
-
-
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
                      upcoming_releases=None, now_playing_titles=None, went_on_sale_keys=frozenset()):
     metascores = metascores or {}
@@ -595,13 +578,11 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
-            entry = metascores.get(movie) or {}
-            poster = _poster_img(entry.get("poster"), movie)
             search_key = html.escape(movie.lower())
             movie_rows.append(
-                f'<div class="movie" data-movie="{search_key}">{poster}'
-                f'<div class="movie-info"><div class="movie-name">{html.escape(movie)}</div>'
-                f'<div class="times">{time_chips}</div></div></div>'
+                f'<div class="movie" data-movie="{search_key}">'
+                f'<div class="movie-name">{html.escape(movie)}</div>'
+                f'<div class="times">{time_chips}</div></div>'
             )
         is_today = date_str == today_str
         day_cls = "day today" if is_today else "day"
@@ -657,11 +638,9 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
             entry = metascores.get(t) or {}
             mc_cell = _metascore_badge(entry.get("score"), t) or "—"
             rt_cell = _rt_badge(entry.get("rt"), t) or "—"
-            poster = _poster_img(entry.get("poster"), t, cls="poster-sm")
             search_key = html.escape(t.lower())
             row_html.append(
-                f'<tr data-movie="{search_key}"><td class="now-title">'
-                f'<span class="now-title-inner">{poster}<span>{html.escape(t)}</span></span></td>'
+                f'<tr data-movie="{search_key}"><td class="now-title">{html.escape(t)}</td>'
                 f'<td class="now-score">{mc_cell}</td>'
                 f'<td class="now-score">{rt_cell}</td></tr>'
             )
@@ -699,32 +678,24 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
 <title>Dolby Cinema Showtimes — {html.escape(THEATER_NAME)}</title>
 <style>
   :root {{
-    color-scheme: light dark;
-    --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6f;
-    --accent: #7c3aed; --chip-bg: #efe9fc; --border: #e6e6e9;
-    --new-bg: #dcfce7; --new-text: #15803d; --new-card: #f0fdf4; --new-border: #bbf7d0;
-    --sale-text: #b45309; --sale-card: #fffaf0; --sale-border: #fde3b8;
+    color-scheme: dark;
+    --bg: #000000; --card: #19191b; --text: #f5f5f5; --muted: #9a9a9f;
+    --accent: #e4002b; --accent-text: #ffffff; --border: #2c2c2e;
+    --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26;
+    --sale-text: #fbbf24; --sale-card: #2a1d0f; --sale-border: #4a2c0a;
     --avail-bg: #e36600; --avail-text: #ffffff;
-    --restricted-bg: #e5e7eb; --restricted-text: #6b7280;
-    --badge-bg: rgba(255, 255, 255, 0.92); --badge-text: #111827;
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{ --bg: #131316; --card: #1c1c20; --text: #f2f2f3; --muted: #a0a0a6;
-      --accent: #b394f5; --chip-bg: #2a2333; --border: #2c2c31;
-      --new-bg: #14532d; --new-text: #86efac; --new-card: #142018; --new-border: #1e3a26;
-      --sale-text: #fbbf24; --sale-card: #2a1d0f; --sale-border: #4a2c0a;
-      --avail-bg: #f2790a; --avail-text: #17110a;
-      --restricted-bg: #2c2c31; --restricted-text: #8a8a90;
-      --badge-bg: rgba(0, 0, 0, 0.55); --badge-text: #ffffff; }}
+    --restricted-bg: #2c2c2e; --restricted-text: #8a8a90;
+    --badge-bg: rgba(0, 0, 0, 0.55); --badge-text: #ffffff;
   }}
   * {{ box-sizing: border-box; }}
   [hidden] {{ display: none !important; }}
-  body {{ margin: 0; background: var(--bg); color: var(--text);
+  body {{ margin: 0; background: var(--bg); color: var(--text); border-top: 4px solid var(--accent);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
   header {{ padding: 32px 20px 16px; max-width: 1080px; margin: 0 auto; }}
-  header h1 {{ font-size: 1.5rem; margin: 0 0 4px; }}
+  header h1 {{ font-size: 1.6rem; margin: 0 0 4px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.02em; }}
   .amc-link {{ display: inline-block; margin-top: 10px; font-size: 0.85rem; color: var(--accent);
-    text-decoration: none; font-weight: 600; }}
+    text-decoration: none; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }}
   .amc-link:hover {{ text-decoration: underline; }}
   header .sub {{ color: var(--muted); font-size: 0.9rem; }}
   .header-links {{ display: flex; flex-wrap: wrap; gap: 16px; }}
@@ -741,15 +712,11 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   }}
   .day {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }}
   .day.today {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
-  .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); display: flex; align-items: center; gap: 8px; }}
+  .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.02em; color: var(--accent); display: flex; align-items: center; gap: 8px; }}
   .badge-today {{ background: var(--accent); color: #fff; }}
-  .movie {{ padding: 10px 0; border-top: 1px solid var(--border); display: flex; gap: 12px; }}
+  .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
   .movie:first-of-type {{ border-top: none; padding-top: 0; }}
-  .movie-info {{ flex: 1; min-width: 0; }}
-  .poster {{ width: 46px; height: 69px; object-fit: cover; border-radius: 6px; flex-shrink: 0;
-    background: var(--chip-bg); }}
-  .poster-sm {{ width: 28px; height: 42px; object-fit: cover; border-radius: 4px; flex-shrink: 0;
-    background: var(--chip-bg); }}
   .movie-name {{ font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }}
   .score {{ font-size: 0.75rem; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 4px; text-decoration: none; cursor: pointer; }}
   .score:hover {{ filter: brightness(1.12); text-decoration: underline; }}
@@ -772,7 +739,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .legend i.restricted {{ background: var(--restricted-bg); }}
   .banner {{ background: var(--new-card); border: 1px solid var(--new-border); border-radius: 12px;
     padding: 18px 20px; }}
-  .banner h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--new-text); }}
+  .banner h2 {{ margin: 0 0 12px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.02em; color: var(--new-text); }}
   .sale-banner {{ background: var(--sale-card); border-color: var(--sale-border); }}
   .sale-banner h2 {{ color: var(--sale-text); }}
   .new-row {{ display: flex; justify-content: space-between; gap: 12px; padding: 6px 0;
@@ -781,7 +749,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .new-when {{ color: var(--muted); white-space: nowrap; }}
   .now-playing {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
-  .now-playing h2 {{ margin: 0 0 10px; font-size: 1.05rem; color: var(--accent); }}
+  .now-playing h2 {{ margin: 0 0 10px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.02em; color: var(--accent); }}
   .now-table-wrap {{ overflow-x: auto; }}
   .now-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
   .now-table th {{ text-align: left; font-weight: 600; color: var(--muted); font-size: 0.68rem;
@@ -790,11 +759,11 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .now-table td {{ padding: 7px 6px; border-top: 1px solid var(--border); }}
   .now-table tbody tr:first-child td {{ border-top: none; }}
   .now-title {{ font-weight: 600; }}
-  .now-title-inner {{ display: inline-flex; align-items: center; gap: 8px; }}
   .now-score {{ white-space: nowrap; color: var(--muted); }}
   .releases {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
-  .releases h2 {{ margin: 0 0 6px; font-size: 1.05rem; color: var(--accent); }}
+  .releases h2 {{ margin: 0 0 6px; font-size: 1.05rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.02em; color: var(--accent); }}
   .releases-note {{ margin: 0 0 14px; font-size: 0.8rem; color: var(--muted); }}
   .release-row {{ display: flex; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border);
     font-size: 0.9rem; }}
