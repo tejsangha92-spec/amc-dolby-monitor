@@ -87,7 +87,7 @@ def _titles_roughly_match(a, b):
 
 
 _RERELEASE_SUFFIX_RE = re.compile(
-    r':\s*(\d+(st|nd|rd|th)\s+anniversary|anniversary\s+edition|'
+    r'\s*[:\-]?\s*(\d+(st|nd|rd|th)\s+anniversary|anniversary\s+edition|'
     r"director'?s\s+cut|remaster(ed)?|special\s+edition|extended\s+edition|"
     r're-?release|reissue)\b.*$',
     re.IGNORECASE,
@@ -97,11 +97,19 @@ _RERELEASE_SUFFIX_RE = re.compile(
 def fetch_metascore_omdb(movie):
     """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
 
-    Tries the exact title/year first. If that comes up empty, loosens the
-    year (Fandango's listed year sometimes differs from OMDb's, e.g. for
-    festival titles) and strips known re-release/edition suffixes (e.g.
-    "Cars: 20th Anniversary" -> "Cars", since it's the same film and shares
-    its review score) before giving up.
+    Tries the exact title/year first (OMDb's t= parameter, which requires a
+    near-exact title). If that comes up empty, loosens the year (Fandango's
+    listed year sometimes differs from OMDb's, e.g. for festival titles or
+    a rerun tagged with the screening year instead of the release year) and
+    strips known re-release/edition suffixes (e.g. "A Beautiful Mind 25th
+    Anniversary" -> "A Beautiful Mind", since it's the same film and shares
+    its review score) before giving up on an exact match.
+
+    Falls back to OMDb's fuzzy search (s=), verified via _titles_roughly_match
+    to avoid attaching the wrong movie's score, for titles whose exact text
+    doesn't line up with OMDb's (a scraped title with extra/altered wording,
+    e.g. a rerelease subtitle OMDb doesn't use) but that OMDb still has
+    reviews for under a slightly different title.
 
     (OMDb dropped Rotten Tomatoes data in 2018, so RT scores are scraped
     separately in scrape_rt_score().)
@@ -126,6 +134,42 @@ def fetch_metascore_omdb(movie):
                 print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
                 continue
             score = data.get("Metascore")
+            if score and score.isdigit():
+                return int(score)
+
+    for t in titles_to_try:
+        try:
+            resp = requests.get(
+                "https://www.omdbapi.com/",
+                params={"s": t, "type": "movie", "apikey": OMDB_API_KEY},
+                timeout=10,
+            )
+            results = resp.json().get("Search") or []
+        except Exception as e:
+            print(f"  ⚠️  Metascore search failed for {movie}: {e}")
+            continue
+
+        candidates = sorted(
+            results,
+            key=lambda r: (
+                0 if year and r.get("Year", "").strip() == year else 1,
+                -difflib.SequenceMatcher(None, t.lower(), r.get("Title", "").lower()).ratio(),
+            ),
+        )
+        for r in candidates[:3]:
+            if not r.get("imdbID") or not _titles_roughly_match(t, r.get("Title", "")):
+                continue
+            try:
+                detail_resp = requests.get(
+                    "https://www.omdbapi.com/",
+                    params={"i": r["imdbID"], "apikey": OMDB_API_KEY},
+                    timeout=10,
+                )
+                detail = detail_resp.json()
+            except Exception as e:
+                print(f"  ⚠️  Metascore detail lookup failed for {movie}: {e}")
+                continue
+            score = detail.get("Metascore")
             if score and score.isdigit():
                 return int(score)
 
