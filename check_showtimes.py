@@ -128,7 +128,7 @@ def fetch_metascore_omdb(movie):
             if y:
                 params["y"] = y
             try:
-                resp = requests.get("https://www.omdbapi.com/", params=params, timeout=10)
+                resp = requests.get("https://www.omdbapi.com/", params=params, timeout=15)
                 data = resp.json()
             except Exception as e:
                 print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
@@ -142,7 +142,7 @@ def fetch_metascore_omdb(movie):
             resp = requests.get(
                 "https://www.omdbapi.com/",
                 params={"s": t, "type": "movie", "apikey": OMDB_API_KEY},
-                timeout=10,
+                timeout=15,
             )
             results = resp.json().get("Search") or []
         except Exception as e:
@@ -163,7 +163,7 @@ def fetch_metascore_omdb(movie):
                 detail_resp = requests.get(
                     "https://www.omdbapi.com/",
                     params={"i": r["imdbID"], "apikey": OMDB_API_KEY},
-                    timeout=10,
+                    timeout=15,
                 )
                 detail = detail_resp.json()
             except Exception as e:
