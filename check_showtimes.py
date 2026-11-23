@@ -95,7 +95,8 @@ _RERELEASE_SUFFIX_RE = re.compile(
 
 
 def fetch_metascore_omdb(movie):
-    """Look up a Metacritic score (0-100) for a movie via OMDb. None if unknown.
+    """Look up a Metacritic score (0-100) and poster URL for a movie via
+    OMDb. Returns (metascore_or_None, poster_url_or_None).
 
     Tries the exact title/year first. If that comes up empty, loosens the
     year (Fandango's listed year sometimes differs from OMDb's, e.g. for
@@ -126,10 +127,13 @@ def fetch_metascore_omdb(movie):
                 print(f"  ⚠️  Metascore lookup failed for {movie}: {e}")
                 continue
             score = data.get("Metascore")
-            if score and score.isdigit():
-                return int(score)
+            score = int(score) if score and score.isdigit() else None
+            poster = data.get("Poster")
+            poster = poster if poster and poster.startswith("http") else None
+            if score is not None or poster is not None:
+                return score, poster
 
-    return None
+    return None, None
 
 
 def scrape_rt_score(movie, page):
@@ -259,9 +263,9 @@ def update_metascores(movie_titles):
             )
             page = context.new_page()
             for movie in needs_fetch:
-                metascore = fetch_metascore_omdb(movie)
+                metascore, poster = fetch_metascore_omdb(movie)
                 rt_score = scrape_rt_score(movie, page)
-                cache[movie] = {"score": metascore, "rt": rt_score, "checked": today}
+                cache[movie] = {"score": metascore, "rt": rt_score, "poster": poster, "checked": today}
             browser.close()
 
     save_metascores(cache)
@@ -549,6 +553,17 @@ def _rt_badge(rt_score, movie):
     )
 
 
+def _poster_img(poster_url, movie, cls="poster"):
+    """Poster thumbnail <img>, or "" if no poster is known. Removes itself
+    on load failure (e.g. a dead OMDb-hosted image URL) rather than
+    showing a broken-image icon."""
+    if not poster_url:
+        return ""
+    alt = html.escape(movie)
+    src = html.escape(poster_url)
+    return f'<img class="{cls}" src="{src}" alt="{alt}" loading="lazy" onerror="this.remove()">'
+
+
 
 
 def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=None,
@@ -570,6 +585,8 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
             badge = ""
         return f'<span class="chip {avail_cls}">{badge}{_format_time(st["time"])}</span>'
 
+    today_str = generated_at.strftime("%Y-%m-%d")
+    has_today_section = today_str in by_date
     date_cards = []
     for date_str in sorted(by_date):
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
@@ -578,13 +595,21 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         for movie in sorted(movies, key=lambda m: min(_time_sort_key(s['time']) for s in movies[m])):
             sts = sorted(movies[movie], key=lambda s: _time_sort_key(s['time']))
             time_chips = "".join(chip(s) for s in sts)
+            entry = metascores.get(movie) or {}
+            poster = _poster_img(entry.get("poster"), movie)
+            search_key = html.escape(movie.lower())
             movie_rows.append(
-                f'<div class="movie"><div class="movie-name">{html.escape(movie)}</div>'
-                f'<div class="times">{time_chips}</div></div>'
+                f'<div class="movie" data-movie="{search_key}">{poster}'
+                f'<div class="movie-info"><div class="movie-name">{html.escape(movie)}</div>'
+                f'<div class="times">{time_chips}</div></div></div>'
             )
+        is_today = date_str == today_str
+        day_cls = "day today" if is_today else "day"
+        today_badge = '<span class="badge badge-today">TODAY</span>' if is_today else ""
+        id_attr = ' id="today"' if is_today else ""
         date_cards.append(
-            f'<section class="day">'
-            f'<h2>{date_obj.strftime("%A, %B %-d")}</h2>'
+            f'<section class="{day_cls}"{id_attr}>'
+            f'<h2>{date_obj.strftime("%A, %B %-d")}{today_badge}</h2>'
             f'{"".join(movie_rows)}'
             f'</section>'
         )
@@ -624,7 +649,6 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
         )
 
     if now_playing_titles is None:
-        today_str = generated_at.strftime("%Y-%m-%d")
         now_playing_titles = sorted({st['movie'] for st in showtimes if st['date'] == today_str})
     now_playing_section = ""
     if now_playing_titles:
@@ -633,8 +657,11 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
             entry = metascores.get(t) or {}
             mc_cell = _metascore_badge(entry.get("score"), t) or "—"
             rt_cell = _rt_badge(entry.get("rt"), t) or "—"
+            poster = _poster_img(entry.get("poster"), t, cls="poster-sm")
+            search_key = html.escape(t.lower())
             row_html.append(
-                f'<tr><td class="now-title">{html.escape(t)}</td>'
+                f'<tr data-movie="{search_key}"><td class="now-title">'
+                f'<span class="now-title-inner">{poster}<span>{html.escape(t)}</span></span></td>'
                 f'<td class="now-score">{mc_cell}</td>'
                 f'<td class="now-score">{rt_cell}</td></tr>'
             )
@@ -691,6 +718,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
       --badge-bg: rgba(0, 0, 0, 0.55); --badge-text: #ffffff; }}
   }}
   * {{ box-sizing: border-box; }}
+  [hidden] {{ display: none !important; }}
   body {{ margin: 0; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
   header {{ padding: 32px 20px 16px; max-width: 1080px; margin: 0 auto; }}
@@ -699,6 +727,10 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     text-decoration: none; font-weight: 600; }}
   .amc-link:hover {{ text-decoration: underline; }}
   header .sub {{ color: var(--muted); font-size: 0.9rem; }}
+  .header-links {{ display: flex; flex-wrap: wrap; gap: 16px; }}
+  .search-box {{ width: 100%; margin-top: 14px; padding: 10px 14px; font-size: 0.9rem;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--text); }}
+  .search-box:focus {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
   main {{ max-width: 1080px; margin: 0 auto; padding: 8px 20px 60px;
     display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }}
   .primary {{ display: grid; gap: 16px; min-width: 0; }}
@@ -708,9 +740,16 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
     .sidebar {{ position: static; }}
   }}
   .day {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }}
-  .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); }}
-  .movie {{ padding: 10px 0; border-top: 1px solid var(--border); }}
+  .day.today {{ border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }}
+  .day h2 {{ margin: 0 0 12px; font-size: 1.05rem; color: var(--accent); display: flex; align-items: center; gap: 8px; }}
+  .badge-today {{ background: var(--accent); color: #fff; }}
+  .movie {{ padding: 10px 0; border-top: 1px solid var(--border); display: flex; gap: 12px; }}
   .movie:first-of-type {{ border-top: none; padding-top: 0; }}
+  .movie-info {{ flex: 1; min-width: 0; }}
+  .poster {{ width: 46px; height: 69px; object-fit: cover; border-radius: 6px; flex-shrink: 0;
+    background: var(--chip-bg); }}
+  .poster-sm {{ width: 28px; height: 42px; object-fit: cover; border-radius: 4px; flex-shrink: 0;
+    background: var(--chip-bg); }}
   .movie-name {{ font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }}
   .score {{ font-size: 0.75rem; font-weight: 700; color: #fff; padding: 1px 7px; border-radius: 4px; text-decoration: none; cursor: pointer; }}
   .score:hover {{ filter: brightness(1.12); text-decoration: underline; }}
@@ -751,6 +790,7 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   .now-table td {{ padding: 7px 6px; border-top: 1px solid var(--border); }}
   .now-table tbody tr:first-child td {{ border-top: none; }}
   .now-title {{ font-weight: 600; }}
+  .now-title-inner {{ display: inline-flex; align-items: center; gap: 8px; }}
   .now-score {{ white-space: nowrap; color: var(--muted); }}
   .releases {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 18px 20px; }}
@@ -769,13 +809,18 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
   <h1>🎬 Dolby Cinema Showtimes</h1>
   <div class="sub">{html.escape(THEATER_NAME)} · updated {generated_at.strftime("%b %-d, %Y at %-I:%M %p UTC")}</div>
   <div class="legend"><span><i class="available"></i>Tickets on sale</span><span><i class="restricted"></i>Not yet available</span></div>
-  <a class="amc-link" href="{AMC_THEATER_URL}" target="_blank" rel="noopener">View all showtimes on AMC Theatres →</a>
+  <div class="header-links">
+    <a class="amc-link" href="{AMC_THEATER_URL}" target="_blank" rel="noopener">View all showtimes on AMC Theatres →</a>
+    {'<a class="amc-link" href="#today">Jump to today ↓</a>' if has_today_section else ''}
+  </div>
+  <input type="search" id="movie-search" class="search-box" placeholder="Search movies…" autocomplete="off">
 </header>
 <main>
 <div class="primary">
 {banner}
 {sale_banner}
 {body}
+<p id="no-results" class="empty" hidden>No movies match your search.</p>
 </div>
 <aside class="sidebar">
 {now_playing_section}
@@ -783,6 +828,38 @@ def build_site_html(showtimes, generated_at, new_keys=frozenset(), metascores=No
 </aside>
 </main>
 <footer>Auto-generated hourly from Fandango. Runtimes/times as listed by the theater; always double-check before heading out.</footer>
+<script>
+(function() {{
+  var input = document.getElementById('movie-search');
+  if (!input) return;
+  var days = Array.from(document.querySelectorAll('.day'));
+  var rows = Array.from(document.querySelectorAll('.now-table tbody tr'));
+  var noResults = document.getElementById('no-results');
+
+  input.addEventListener('input', function() {{
+    var q = input.value.trim().toLowerCase();
+    var anyDayVisible = false;
+
+    days.forEach(function(day) {{
+      var dayHasMatch = false;
+      day.querySelectorAll('.movie').forEach(function(movieEl) {{
+        var match = !q || (movieEl.dataset.movie || '').indexOf(q) !== -1;
+        movieEl.hidden = !match;
+        if (match) dayHasMatch = true;
+      }});
+      day.hidden = !dayHasMatch;
+      if (dayHasMatch) anyDayVisible = true;
+    }});
+
+    rows.forEach(function(row) {{
+      var match = !q || (row.dataset.movie || '').indexOf(q) !== -1;
+      row.hidden = !match;
+    }});
+
+    noResults.hidden = anyDayVisible || !q;
+  }});
+}})();
+</script>
 </body>
 </html>
 '''
